@@ -332,6 +332,9 @@ class MksServo:
         elif isinstance(data, bool):
             # Assuming _bool_to_int is a method that converts a boolean to an integer
             data = self._bool_to_int(data)
+        elif isinstance(data, Enum):
+            # Convert enum to its value
+            data = [data.value]
 
         msg = self.create_can_msg([op_code] + data)
         # Flag to indicate whether the response has been received
