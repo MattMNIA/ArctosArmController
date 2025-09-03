@@ -11,8 +11,8 @@ import yaml
 from pathlib import Path
 from typing import cast
 from can import BusABC
-from mks_servo_can import mks_servo
-from mks_servo_can.mks_servo import Enable
+from .mks_servo_can import mks_servo
+from .mks_servo_can.mks_servo import Enable
 
 
 

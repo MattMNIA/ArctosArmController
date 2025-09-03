@@ -4,6 +4,7 @@ from flask_socketio import SocketIO, emit
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
 from core.motion_service import MotionService
+from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
 
 socketio = SocketIO(cors_allowed_origins="*")
 
@@ -14,9 +15,10 @@ def create_app():
     app.config["SECRET_KEY"] = "dev-secret"  # replace in prod
 
     socketio.init_app(app)
-
+    # Initialize Drivers
+    pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/core/models/urdf/arctos_urdf.urdf")
     # Initialize MotionService
-    motion_service = MotionService()
+    motion_service = MotionService(driver=pybullet_driver)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
     app.config['motion_service'] = motion_service
     motion_service.start()

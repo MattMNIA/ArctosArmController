@@ -2,6 +2,7 @@ import pybullet as p
 import pybullet_data
 import time
 from typing import List, Dict, Any, Optional
+from utils.logger import logger
 
 class PyBulletDriver:
     """
@@ -21,6 +22,8 @@ class PyBulletDriver:
         self.num_joints: int = 0
         self.joint_indices: List[int] = []
         self.time_step = 1.0 / 240.0  # default PyBullet timestep
+        logger.info("PyBulletDriver created with URDF: %s, GUI: %s", urdf_path, gui)
+        
 
     def connect(self):
         if self.gui:
