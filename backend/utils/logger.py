@@ -2,17 +2,31 @@
 import logging
 import sys
 
-def setup_logger(name="robotctl", level=logging.DEBUG):
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        fmt = logging.Formatter(
-            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%H:%M:%S"
-        )
-        handler.setFormatter(fmt)
-        logger.addHandler(handler)
-        logger.setLevel(level)
-    return logger
+def setup_logging(level=logging.DEBUG, component_levels=None):
+    """
+    Set up logging configuration for the entire application.
+    This configures the root logger with a formatter that includes the logger name.
+    
+    :param level: Default logging level for the root logger.
+    :param component_levels: Dict of component names to their logging levels, e.g., {'api': logging.DEBUG}
+    """
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stdout
+    )
+    
+    # Set specific levels for components
+    if component_levels:
+        for component, comp_level in component_levels.items():
+            logging.getLogger(component).setLevel(comp_level)
 
-logger = setup_logger()
+# Call setup_logging with default settings
+# You can modify this dict to enable specific logging levels for components
+component_levels = {
+    'api': logging.DEBUG,
+    'core.drivers.can_driver': logging.INFO, 
+    'core.motion_service': logging.DEBUG, 
+}
+setup_logging(component_levels=component_levels)

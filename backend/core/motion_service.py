@@ -2,8 +2,10 @@ import threading
 import time
 import queue
 from typing import Dict, Any, List, Optional, Callable
-from utils.logger import logger
+import logging
 from core.drivers.sim_driver import SimDriver
+
+logger = logging.getLogger(__name__)
 
 class MotionCommand:
     def __init__(self, q: List[float], duration_s: float, simulate: bool = True):

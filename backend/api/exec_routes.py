@@ -1,7 +1,9 @@
 # api/exec_routes.py
 from flask import Blueprint, request, jsonify, current_app
+import logging
 from core.motion_service import MotionCommand
-from utils.logger import logger
+
+logger = logging.getLogger(__name__)
 
 exec_bp = Blueprint('exec', __name__)
 

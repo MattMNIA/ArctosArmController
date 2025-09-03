@@ -2,9 +2,9 @@ import pybullet as p
 import pybullet_data
 import time
 from typing import List, Dict, Any, Optional
-from utils.logger import setup_logger
+import logging
 
-logger = setup_logger("PyBulletDriver")
+logger = logging.getLogger(__name__)
 
 class PyBulletDriver:
     """

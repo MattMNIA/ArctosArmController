@@ -1,6 +1,6 @@
-# core/drivers/base.py
+# core/drivers/can_driver.py
+import logging
 from typing import Protocol, List, Dict, Any
-from utils.logger import logger
 import platform
 import time
 import concurrent.futures
@@ -13,6 +13,8 @@ from typing import cast
 from can import BusABC
 from .mks_servo_can import mks_servo
 from .mks_servo_can.mks_servo import Enable
+
+logger = logging.getLogger(__name__)
 
 
 

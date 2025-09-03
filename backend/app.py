@@ -6,6 +6,7 @@ from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
 from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
+import utils.logger  # Import to trigger logging setup
 
 socketio = SocketIO(cors_allowed_origins="*")
 
