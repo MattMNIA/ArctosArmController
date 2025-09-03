@@ -2,7 +2,9 @@ import pybullet as p
 import pybullet_data
 import time
 from typing import List, Dict, Any, Optional
-from utils.logger import logger
+from utils.logger import setup_logger
+
+logger = setup_logger("PyBulletDriver")
 
 class PyBulletDriver:
     """
@@ -40,8 +42,12 @@ class PyBulletDriver:
             useFixedBase=True
         )
 
-        self.num_joints = p.getNumJoints(self.robot_id)
-        self.joint_indices = list(range(self.num_joints))
+        # Filter out fixed joints (type 4), keep only revolute/prismatic and optionally gripper
+        self.joint_indices = [
+            j for j in range(p.getNumJoints(self.robot_id))
+            if p.getJointInfo(self.robot_id, j)[2] == p.JOINT_REVOLUTE
+        ]
+        self.num_joints = len(self.joint_indices)
 
         # Reset joints to zero
         for j in self.joint_indices:
@@ -74,18 +80,23 @@ class PyBulletDriver:
         :param t_s: Duration to hold the command (not smooth trajectory yet).
         """
         if len(q) != self.num_joints:
+            logger.error(f"Expected {self.num_joints} joints, got {len(q)}")
             raise ValueError(f"Expected {self.num_joints} joints, got {len(q)}")
 
+        logger.info(f"Sending joint targets: {q} for {t_s} seconds")
+
         for j, angle in enumerate(q):
+            logger.debug(f"Setting joint {j} to {angle} radians")
             p.setJointMotorControl2(
-                self.robot_id,
-                j,
-                controlMode=p.POSITION_CONTROL,
-                targetPosition=angle
+            self.robot_id,
+            j,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=angle
             )
 
         # Step simulation for t_s seconds
         steps = int(t_s / self.time_step)
+        logger.debug(f"Stepping simulation for {steps} steps")
         for _ in range(steps):
             p.stepSimulation()
             time.sleep(self.time_step)

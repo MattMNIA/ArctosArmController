@@ -2,3 +2,4 @@ python-can
 pyserial
 PyYAML
 pybullet
+flask-cors

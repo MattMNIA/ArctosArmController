@@ -26,15 +26,18 @@ class MotionService:
         self.running = True
         self.driver.connect()
         self.driver.enable()
+        logger.info("MotionService state: RUNNING")
         self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
 
     def stop(self):
         logger.info("Stopping MotionService loop")
+        logger.info("MotionService state: STOPPING")
         self.running = False
         if self.thread:
             self.thread.join()
         self.driver.disable()
+        logger.info("MotionService stopped")
 
     def enqueue(self, cmd: MotionCommand):
         logger.info(f"Enqueued command: q={cmd.q}, duration={cmd.duration_s}s")
@@ -45,6 +48,8 @@ class MotionService:
         while self.running:
             try:
                 cmd = self.command_queue.get(timeout=dt)
+                logger.info("Retrieved command from queue")
+                logger.info("Queue size after get: %d", self.command_queue.qsize())
                 self._execute(cmd)
             except queue.Empty:
                 pass
@@ -55,11 +60,13 @@ class MotionService:
 
     def _execute(self, cmd: MotionCommand):
         logger.info(f"Executing command {cmd.q} over {cmd.duration_s}s")
+        logger.info("MotionService state: EXECUTING")
         self.current_state = "EXECUTING"
         self.driver.send_joint_targets(cmd.q, cmd.duration_s)
         time.sleep(cmd.duration_s)
         self.current_state = "IDLE"
         logger.info("Execution complete")
+        logger.info("MotionService state: IDLE")
 
     def _emit_status(self, feedback: Dict[str, Any]):
         event = {

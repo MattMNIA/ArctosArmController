@@ -1,5 +1,6 @@
 # app.py
 from flask import Flask
+from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
@@ -8,10 +9,9 @@ from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
 
 socketio = SocketIO(cors_allowed_origins="*")
 
-socketio = SocketIO(cors_allowed_origins="*")
-
 def create_app():
     app = Flask(__name__)
+    CORS(app)  # Enable CORS for all routes
     app.config["SECRET_KEY"] = "dev-secret"  # replace in prod
 
     socketio.init_app(app)

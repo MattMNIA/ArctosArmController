@@ -1,12 +1,14 @@
 # api/exec_routes.py
 from flask import Blueprint, request, jsonify, current_app
 from core.motion_service import MotionCommand
+from utils.logger import logger
 
 exec_bp = Blueprint('exec', __name__)
 
 @exec_bp.route('/execute', methods=['POST'])
 def execute():
     payload = request.json
+    logger.debug("Received payload: %s", payload)
     if not payload:
         return jsonify({"error": "No payload"}), 400
     
@@ -17,7 +19,12 @@ def execute():
         return jsonify({"error": "Invalid joint targets 'q'"}), 400
     
     motion_service = current_app.config['motion_service']
+    if not motion_service.running:
+        logger.error("MotionService is not running")
+        return jsonify({"error": "MotionService not running"}), 500
     cmd = MotionCommand(q=q, duration_s=duration_s)
     motion_service.enqueue(cmd)
-    
+
+    logger.info("Motion command enqueued: %s", payload)
+    logger.info("Command queue size: %d", motion_service.command_queue.qsize())
     return jsonify({"status": "queued", "command": payload})
