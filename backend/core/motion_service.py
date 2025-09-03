@@ -1,7 +1,7 @@
 import threading
 import time
 import queue
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from utils.logger import logger
 from core.drivers.sim_driver import SimDriver
 
@@ -19,7 +19,7 @@ class MotionService:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.current_state = "IDLE"
-        self.ws_emit = None  # injected by Flask/socketio
+        self.ws_emit: Optional[Callable[[str, Dict[str, Any]], None]] = None  # injected by Flask/socketio
 
     def start(self):
         logger.info("Starting MotionService loop")
@@ -56,10 +56,8 @@ class MotionService:
     def _execute(self, cmd: MotionCommand):
         logger.info(f"Executing command {cmd.q} over {cmd.duration_s}s")
         self.current_state = "EXECUTING"
-        steps = int(cmd.duration_s * self.loop_hz)
-        for _ in range(steps):
-            self.driver.send_joint_targets(cmd.q, cmd.duration_s)
-            time.sleep(1.0 / self.loop_hz)
+        self.driver.send_joint_targets(cmd.q, cmd.duration_s)
+        time.sleep(cmd.duration_s)
         self.current_state = "IDLE"
         logger.info("Execution complete")
 

@@ -3,6 +3,9 @@ from flask import Flask
 from flask_socketio import SocketIO, emit
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
+from core.motion_service import MotionService
+
+socketio = SocketIO(cors_allowed_origins="*")
 
 socketio = SocketIO(cors_allowed_origins="*")
 
@@ -11,6 +14,12 @@ def create_app():
     app.config["SECRET_KEY"] = "dev-secret"  # replace in prod
 
     socketio.init_app(app)
+
+    # Initialize MotionService
+    motion_service = MotionService()
+    motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
+    app.config['motion_service'] = motion_service
+    motion_service.start()
 
     # Register blueprints
     app.register_blueprint(ik_bp, url_prefix='/api/ik')
