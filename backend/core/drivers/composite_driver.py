@@ -25,6 +25,9 @@ class CompositeDriver:
 
     def set_gripper_position(self, position: float) -> None:
         for d in self.drivers: d.set_gripper_position(position)
+        
+    def grasp_object(self) -> None:
+        for d in self.drivers: d.grasp_object()
 
     def get_feedback(self):
         # Return feedback from the real arm (first driver)

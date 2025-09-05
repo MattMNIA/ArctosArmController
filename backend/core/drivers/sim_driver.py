@@ -14,3 +14,4 @@ class SimDriver:
     def open_gripper(self): print("SimDriver gripper opened")
     def close_gripper(self): print("SimDriver gripper closed")
     def set_gripper_position(self, position: float): print(f"SimDriver gripper set to {position}")
+    def grasp_object(self): print("SimDriver grasping object")

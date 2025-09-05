@@ -249,10 +249,14 @@ class CanDriver():
         ]
         self.pending_futures = futures
     def open_gripper(self) -> None: ...
+    #TODO 
     def close_gripper(self) -> None: ...
+    #TODO
     def set_gripper_position(self, position: float) -> None: ...
-    
-    
+    #TODO
+    def grasp_object(self) -> None: ...
+        #TODO
+
     def get_feedback(self) -> Dict[str, Any]:
         q = []
         for i, servo in enumerate(self.servos):
