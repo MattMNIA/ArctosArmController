@@ -71,10 +71,15 @@ class MotionService:
         logger.info("MotionService state: IDLE")
 
     def _emit_status(self, feedback: Dict[str, Any]):
+        limits = feedback.get("limits", [])
+        for i, lim in enumerate(limits):
+            if any(lim):
+                logger.warning(f"Limit switch hit on servo {i+1}: IN1={lim[0]}, IN2={lim[1]}")
         event = {
             "state": self.current_state,
             "q": feedback.get("q", []),
             "faults": feedback.get("faults", []),
+            "limits": limits,
             "mode": "SIM" if isinstance(self.driver, SimDriver) else "HW"
         }
         if self.ws_emit:

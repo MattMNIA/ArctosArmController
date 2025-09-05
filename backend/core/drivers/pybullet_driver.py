@@ -114,6 +114,7 @@ class PyBulletDriver:
             "q": q,
             "dq": dq,
             "faults": [],
+            "limits": [[False, False] for _ in self.joint_indices],
         }
 
     def estop(self):

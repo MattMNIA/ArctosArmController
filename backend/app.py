@@ -13,8 +13,6 @@ socketio = SocketIO(cors_allowed_origins="*")
 def create_app():
     app = Flask(__name__)
     CORS(app)  # Enable CORS for all routes
-    app.config["SECRET_KEY"] = "dev-secret"  # replace in prod
-
     socketio.init_app(app)
     # Initialize Drivers
     pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/core/models/urdf/arctos_urdf.urdf")

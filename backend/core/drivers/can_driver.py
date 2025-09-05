@@ -13,6 +13,7 @@ from typing import cast
 from can import BusABC
 from .mks_servo_can import mks_servo
 from .mks_servo_can.mks_servo import Enable
+from utils.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,14 +23,14 @@ class CanDriver():
     def __init__(self):
         # Load configuration
         config_path = Path(__file__).parent.parent.parent / "config" / "default.yml"
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f) or {}
-        can_config = config.get('can_driver', {})
-        self.coupled_mode = config.get('coupled_axis_mode', False)
-        self.gear_ratios = can_config.get('gear_ratios', [1.0] * 6)
-        self.encoder_resolution = can_config.get('encoder_resolution', 16384)
-        self.can_interface = can_config.get('can_interface', 'COM3')
-        self.bitrate = can_config.get('bitrate', 1000000)
+        self.config_manager = ConfigManager(config_path)
+        self.coupled_mode = self.config_manager.get('coupled_axis_mode', False)
+        self.gear_ratios = self.config_manager.get('can_driver.gear_ratios', [1.0] * 6)
+        self.encoder_resolution = self.config_manager.get('can_driver.encoder_resolution', 16384)
+        self.can_interface = self.config_manager.get('can_driver.can_interface', 'COM3')
+        self.bitrate = self.config_manager.get('can_driver.bitrate', 1000000)
+        self.default_speed = self.config_manager.get('can_driver.default_speed', 500)
+        self.default_acc = self.config_manager.get('can_driver.default_acc', 150)
         self.bus = None
         self.servos = []
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
@@ -216,8 +217,8 @@ class CanDriver():
         """
 
         # --- Normalize acceleration and speed for now ---
-        default_speed = 500
-        default_acc = 150
+        default_speed = self.default_speed
+        default_acc = self.default_acc
 
         
         angles_rad = list(q)
@@ -255,7 +256,16 @@ class CanDriver():
             angle_rad = self.encoder_to_angle(encoder_value, i)
             q.append(angle_rad)
         dq = [servo.read_motor_speed() for servo in self.servos]
-        return {"q": q, "dq": dq, "faults": []}
+        limits = []
+        for servo in self.servos:
+            status = servo.read_io_port_status()
+            if status is not None:
+                in1 = bool(status & 0x01)  # Bit 0: IN_1
+                in2 = bool((status >> 1) & 0x01)  # Bit 1: IN_2
+                limits.append([in1, in2])
+            else:
+                limits.append([False, False])
+        return {"q": q, "dq": dq, "faults": [], "limits": limits}
     def estop(self) -> None:
         """
         Immediately stops all motors by sending the emergency stop command to each servo.
