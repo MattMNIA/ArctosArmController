@@ -28,11 +28,56 @@ export default function RobotControl() {
   };
 
   const executeMove = async () => {
-    await fetch("http://localhost:5000/api/execute", {
+    await fetch("http://localhost:5000/api/execute/joints", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ q: joints.map((j: number) => j * Math.PI / 180) })
     });
+  };
+
+  const [gripperPosition, setGripperPosition] = useState<number>(0.0);
+
+  const openGripper = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/execute/open_gripper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        alert("Failed to open gripper");
+      }
+    } catch (error) {
+      alert("Error opening gripper");
+    }
+  };
+
+  const closeGripper = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/execute/close_gripper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        alert("Failed to close gripper");
+      }
+    } catch (error) {
+      alert("Error closing gripper");
+    }
+  };
+
+  const setGripper = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/execute/set_gripper_position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position: gripperPosition }),
+      });
+      if (!res.ok) {
+        alert("Failed to set gripper position");
+      }
+    } catch (error) {
+      alert("Error setting gripper position");
+    }
   };
 
   return (
@@ -65,6 +110,30 @@ export default function RobotControl() {
         <button className="px-4 py-2 bg-green-500 text-white rounded" onClick={executeMove}>
           Execute
         </button>
+      </div>
+      <div>
+        <h2 className="font-semibold">Gripper Control</h2>
+        <div className="flex gap-2">
+          <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={openGripper}>
+            Open Gripper
+          </button>
+          <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={closeGripper}>
+            Close Gripper
+          </button>
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <label>Set Position:</label>
+          <input
+            type="number"
+            step="0.01"
+            value={gripperPosition}
+            onChange={(e) => setGripperPosition(parseFloat(e.target.value) || 0)}
+            className="border p-1"
+          />
+          <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={setGripper}>
+            Set
+          </button>
+        </div>
       </div>
     </div>
   );

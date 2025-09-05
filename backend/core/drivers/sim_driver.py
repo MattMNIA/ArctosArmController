@@ -11,3 +11,6 @@ class SimDriver:
     def get_feedback(self) -> Dict[str, Any]:
         return {"q": [0,0,0,0,0,0], "dq": [0,0,0,0,0,0], "faults": [], "limits": [[False, False] for _ in range(6)]}
     def estop(self): print("SimDriver ESTOP triggered")
+    def open_gripper(self): print("SimDriver gripper opened")
+    def close_gripper(self): print("SimDriver gripper closed")
+    def set_gripper_position(self, position: float): print(f"SimDriver gripper set to {position}")

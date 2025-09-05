@@ -248,7 +248,11 @@ class CanDriver():
             for i, angle in enumerate(angles_rad)
         ]
         self.pending_futures = futures
-
+    def open_gripper(self) -> None: ...
+    def close_gripper(self) -> None: ...
+    def set_gripper_position(self, position: float) -> None: ...
+    
+    
     def get_feedback(self) -> Dict[str, Any]:
         q = []
         for i, servo in enumerate(self.servos):

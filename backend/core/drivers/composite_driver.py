@@ -17,6 +17,15 @@ class CompositeDriver:
     def send_joint_targets(self, q, t_s):
         for d in self.drivers: d.send_joint_targets(q, t_s)
 
+    def open_gripper(self) -> None:
+        for d in self.drivers: d.open_gripper()
+
+    def close_gripper(self) -> None:
+        for d in self.drivers: d.close_gripper()
+
+    def set_gripper_position(self, position: float) -> None:
+        for d in self.drivers: d.set_gripper_position(position)
+
     def get_feedback(self):
         # Return feedback from the real arm (first driver)
         return self.drivers[0].get_feedback()

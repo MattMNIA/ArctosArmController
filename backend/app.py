@@ -15,7 +15,7 @@ def create_app():
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
     # Initialize Drivers
-    pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/core/models/urdf/arctos_urdf.urdf")
+    pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
     # Initialize MotionService
     motion_service = MotionService(driver=pybullet_driver)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
@@ -24,7 +24,7 @@ def create_app():
 
     # Register blueprints
     app.register_blueprint(ik_bp, url_prefix='/api/ik')
-    app.register_blueprint(exec_bp, url_prefix='/api')
+    app.register_blueprint(exec_bp, url_prefix='/api/execute')
 
     # Example WebSocket channel
     @socketio.on("connect")
