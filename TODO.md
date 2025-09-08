@@ -1,0 +1,3 @@
+- [ ] Ensure PyBullet simulation synchronizes with CAN driver actions:
+    - When the CAN driver closes the gripper and encounters resistance (e.g., object prevents full closure), update the simulation to reflect the actual gripper position.
+    - Implement feedback from CAN driver to PyBullet so simulation state matches real-world actuator limits and responses.
