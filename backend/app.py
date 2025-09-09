@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
+from core.drivers import composite_driver
 from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
 import utils.logger  # Import to trigger logging setup
@@ -16,8 +17,10 @@ def create_app():
     socketio.init_app(app)
     # Initialize Drivers
     pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
+    can_driver = CanDriver()
+    comp_driver = composite_driver.CompositeDriver([pybullet_driver, can_driver])
     # Initialize MotionService
-    motion_service = MotionService(driver=pybullet_driver)
+    motion_service = MotionService(driver=can_driver)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
     app.config['motion_service'] = motion_service
     motion_service.start()
@@ -35,4 +38,4 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False)

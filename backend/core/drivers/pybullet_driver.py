@@ -227,5 +227,9 @@ class PyBulletDriver:
                 force=0
             )
         print("[PyBulletDriver] EMERGENCY STOP triggered")
+
+    def handle_limits(self, feedback: Dict[str, Any]) -> bool:
+        """PyBulletDriver has no limits, so always return False."""
+        return False
         
 

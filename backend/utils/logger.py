@@ -28,5 +28,10 @@ component_levels = {
     'api': logging.DEBUG,
     'core.drivers.can_driver': logging.INFO, 
     'core.motion_service': logging.DEBUG, 
+    'core.drivers.mks_servo_can.mks_servo': logging.INFO,
+    'backend.core.drivers.mks_servo_can.mks_servo': logging.INFO,
 }
 setup_logging(component_levels=component_levels)
+
+# Create a logger instance for import
+logger = logging.getLogger()

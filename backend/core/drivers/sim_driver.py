@@ -2,6 +2,8 @@ import time
 from typing import List, Dict, Any
 
 class SimDriver:
+    def __init__(self):
+        self.auto_clear_limits = False  # Default for SimDriver
     def connect(self): print("SimDriver connected")
     def enable(self): print("SimDriver enabled")
     def disable(self): print("SimDriver disabled")
@@ -14,4 +16,6 @@ class SimDriver:
     def open_gripper(self): print("SimDriver gripper opened")
     def close_gripper(self): print("SimDriver gripper closed")
     def set_gripper_position(self, position: float): print(f"SimDriver gripper set to {position}")
-    def grasp_object(self): print("SimDriver grasping object")
+    def handle_limits(self, feedback: Dict[str, Any]) -> bool:
+        """SimDriver has no limits, so always return False."""
+        return False

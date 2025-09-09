@@ -35,3 +35,7 @@ class CompositeDriver:
 
     def estop(self):
         for d in self.drivers: d.estop()
+
+    def handle_limits(self, feedback):
+        # Aggregate limit handling from all drivers
+        return any(d.handle_limits(feedback) for d in self.drivers)

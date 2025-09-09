@@ -7,6 +7,8 @@ from typing import Optional
 from enum import Enum
 from .mks_enums import Enable, SuccessStatus, MksCommands
 
+logging.basicConfig(level=logging.INFO)
+
 
 class CanMessageError(Exception):
     """Raised for errors related to CAN messaging."""
