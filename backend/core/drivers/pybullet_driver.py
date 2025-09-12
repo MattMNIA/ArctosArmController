@@ -178,7 +178,7 @@ class PyBulletDriver:
         )
 
         # Step simulation to allow movement
-        self.step_simulation(0.5)
+        self.step_simulation(0.05)
     
     def grasp_object(self, force: float = 100) -> None:
         """Close gripper with specified force for grasping"""
@@ -199,7 +199,7 @@ class PyBulletDriver:
         )
         
         # Step simulation to allow grasping
-        self.step_simulation(0.5)
+        self.step_simulation(0.05)
         
     def get_feedback(self) -> Dict[str, Any]:
         """Return current joint positions and velocities."""

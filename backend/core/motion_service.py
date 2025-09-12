@@ -225,6 +225,28 @@ class MotionService:
             self.current_state = "ERROR"
             with self._command_lock:
                 self._current_command = None
+                
+    def teleop_step(self, input_controller):
+        commands = input_controller.get_commands()
+
+        feedback = self.driver.get_feedback()
+        q_current = list(feedback.get("q", []))
+
+        # Apply joint deltas
+        for j, delta in commands.items():
+            if isinstance(j, int) and j < len(q_current):
+                q_current[j] += delta * 0.01  # scale for smoothness
+
+        # Handle gripper commands
+        if "gripper" in commands:
+            action = commands["gripper"]
+            if action > 0:
+                self.driver.open_gripper()
+            elif action < 0:
+                self.driver.close_gripper()
+
+        self.driver.send_joint_targets(q_current, t_s=0.05)
+
 
     def _check_command_completion(self):
         """Check if the current command has completed."""

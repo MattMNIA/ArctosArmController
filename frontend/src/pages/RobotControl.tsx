@@ -6,7 +6,7 @@ const socket = io("http://localhost:5000");
 
 export default function RobotControl() {
   const [msg, setMsg] = useState("Connecting...");
-  const [joints, setJoints] = useState<number[]>([0,0,0,0,0,0]);
+  const [jointInputs, setJointInputs] = useState<string[]>(['0','0','0','0','0','0']);
 
   useEffect(() => {
     socket.on("connect", () => setMsg("Connected to backend"));
@@ -18,24 +18,27 @@ export default function RobotControl() {
   }, []);
 
   const sendIK = async () => {
+    const jointValues = jointInputs.map(j => parseFloat(j) || 0);
     const res = await fetch("http://localhost:5000/api/ik/solve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pose: { position: [0.3, 0.1, 0.2], orientation: [0,0,0,1] }, seed: joints.map((j: number) => j * Math.PI / 180) })
+      body: JSON.stringify({ pose: { position: [0.3, 0.1, 0.2], orientation: [0,0,0,1] }, seed: jointValues.map((j: number) => j * Math.PI / 180) })
     });
     const data = await res.json();
-    setJoints((data.joints as number[]).map((j: number) => j * 180 / Math.PI));
+    const newJoints = (data.joints as number[]).map((j: number) => j * 180 / Math.PI);
+    setJointInputs(newJoints.map(j => j.toString()));
   };
 
   const executeMove = async () => {
+    const jointValues = jointInputs.map(j => parseFloat(j) || 0);
     await fetch("http://localhost:5000/api/execute/joints", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: joints.map((j: number) => j * Math.PI / 180) })
+      body: JSON.stringify({ q: jointValues.map((j: number) => j * Math.PI / 180) })
     });
   };
 
-  const [gripperPosition, setGripperPosition] = useState<number>(0.0);
+  const [gripperInput, setGripperInput] = useState<string>('0.0');
 
   const openGripper = async () => {
     try {
@@ -67,10 +70,11 @@ export default function RobotControl() {
 
   const setGripper = async () => {
     try {
+      const position = parseFloat(gripperInput) || 0;
       const res = await fetch("http://localhost:5000/api/execute/set_gripper_position", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ position: gripperPosition }),
+        body: JSON.stringify({ position }),
       });
       if (!res.ok) {
         alert("Failed to set gripper position");
@@ -86,17 +90,20 @@ export default function RobotControl() {
       <p>Status: {msg}</p>
       <div>
         <h2 className="font-semibold">Joints</h2>
-        {joints.map((joint, index) => (
+        {jointInputs.map((input, index) => (
           <div key={index} className="flex items-center gap-2">
             <label>Joint {index + 1} (degrees):</label>
             <input
               type="number"
               step="0.01"
-              value={joint}
+              min="-180"
+              max="180"
+              placeholder="e.g. 45"
+              value={input}
               onChange={(e) => {
-                const newJoints = [...joints];
-                newJoints[index] = parseFloat(e.target.value) || 0;
-                setJoints(newJoints);
+                const newInputs = [...jointInputs];
+                newInputs[index] = e.target.value;
+                setJointInputs(newInputs);
               }}
               className="border p-1"
             />
@@ -126,8 +133,11 @@ export default function RobotControl() {
           <input
             type="number"
             step="0.01"
-            value={gripperPosition}
-            onChange={(e) => setGripperPosition(parseFloat(e.target.value) || 0)}
+            min="0"
+            max="1"
+            placeholder="e.g. 0.5"
+            value={gripperInput}
+            onChange={(e) => setGripperInput(e.target.value)}
             className="border p-1"
           />
           <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={setGripper}>
