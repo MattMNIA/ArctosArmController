@@ -1,5 +1,5 @@
 can_driver:
-  gear_ratios: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  gear_ratios: [13.5, 150, 150, 148, 33, 33]
   encoder_resolution: 16384
   can_interface: "COM4"  # or "can0" on Linux
   bitrate: 500000

@@ -7,7 +7,7 @@ from typing import Optional
 from enum import Enum
 from .mks_enums import Enable, SuccessStatus, MksCommands
 
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class CanMessageError(Exception):
@@ -170,7 +170,7 @@ class MksServo:
                         try:
                             self._calibration_status = self.CalibrationResult(status_int)
                         except ValueError:
-                            logging.warning(f"No enum member with value {status_int}")
+                            logger.warning(f"No enum member with value {status_int}")
                     elif (
                         op_code
                         in [
@@ -186,14 +186,14 @@ class MksServo:
                         try:
                             self._motor_run_status = self.RunMotorResult(status_int)
                         except ValueError:
-                            logging.warning(f"No enum member with value {status_int}")
+                            logger.warning(f"No enum member with value {status_int}")
                     elif op_code == MksCommands.GO_HOME_COMMAND and len(message.data) == self.GENERIC_RESPONSE_LENGTH:
                         status_int = int.from_bytes(message.data[1:2], byteorder="big")
                         try:
                             self._homing_status = self.GoHomeResult(status_int)
                             print("self._homing_status", self._homing_status)
                         except ValueError:
-                            logging.warning(f"No enum member with value {status_int}")
+                            logger.warning(f"No enum member with value {status_int}")
                     elif op_code == MksCommands.QUERY_MOTOR_STATUS_COMMAND:
                         # a = 1
                         pass
@@ -251,7 +251,7 @@ class MksServo:
                         print("op_code:", op_code)
                         print(message, flush=True)
             except InvalidCRCError:
-                logging.error(f"CRC check failed for the message")
+                logger.error(f"CRC check failed for the message")
             return True
 
         self.can_id = id
@@ -292,7 +292,7 @@ class MksServo:
         write_data = bytearray(msg) + bytes([crc])
 
         can_message = can.Message(arbitration_id=self.can_id, data=write_data, is_extended_id=False)
-        logging.debug(f"CAN Message Created: {can_message}")
+        logger.debug(f"CAN Message Created: {can_message}")
 
         return can_message
 
@@ -306,7 +306,7 @@ class MksServo:
             bool: True if the last byte of the message data matches the calculated CRC, False otherwise.
         """
 
-        logging.debug(f"Checking CRC for message: {msg}")
+        logger.debug(f"Checking CRC for message: {msg}")
 
         # Calculate expected CRC and compare with the last byte of the message data
         crc = (msg.arbitration_id + sum(msg.data[:-1])) & 0xFF
@@ -346,13 +346,13 @@ class MksServo:
                     self.check_msg_crc(message)
                     if message.arbitration_id == self.can_id:
                         if message.data[0] != op_code or len(message.data) != response_length:
-                            logging.error(f"Unexpected opcode or response length.")
-                            logging.error(f"op_code:0x{op_code:X}")
-                            logging.error(f"message.data:{message.data}")
-                            logging.error(message)
+                            logger.error(f"Unexpected opcode or response length.")
+                            logger.error(f"op_code:0x{op_code:X}")
+                            logger.error(f"message.data:{message.data}")
+                            logger.error(message)
                         status = message.data
                 except InvalidCRCError as e:
-                    logging.error(f"CRC check failed for the message: {e}")
+                    logger.error(f"CRC check failed for the message: {e}")
 
         try:
             self.notifier.add_listener(receive_message)

@@ -33,19 +33,23 @@ def execute():
 
 @exec_bp.route('/open_gripper', methods=['POST'])
 def open_gripper():
+    payload = request.json or {}
+    force = payload.get('force', 50.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
         return jsonify({"error": "MotionService not running"}), 500
-    motion_service.open_gripper()
-    return jsonify({"status": "gripper opened"})
+    motion_service.open_gripper(force)
+    return jsonify({"status": "gripper opened", "force": force})
 
 @exec_bp.route('/close_gripper', methods=['POST'])
 def close_gripper():
+    payload = request.json or {}
+    force = payload.get('force', 50.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
         return jsonify({"error": "MotionService not running"}), 500
-    motion_service.close_gripper()
-    return jsonify({"status": "gripper closed"})
+    motion_service.close_gripper(force)
+    return jsonify({"status": "gripper closed", "force": force})
 
 @exec_bp.route('/set_gripper_position', methods=['POST'])
 def set_gripper_position():
@@ -53,11 +57,22 @@ def set_gripper_position():
     if not payload or 'position' not in payload:
         return jsonify({"error": "Missing 'position' in payload"}), 400
     position = payload['position']
+    force = payload.get('force', 50.0)
     if not isinstance(position, (int, float)):
         return jsonify({"error": "'position' must be a number"}), 400
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
         return jsonify({"error": "MotionService not running"}), 500
-    motion_service.set_gripper_position(position)
-    return jsonify({"status": f"gripper set to {position}"})
+    motion_service.set_gripper_position(position, force)
+    return jsonify({"status": f"gripper set to {position}", "force": force})
+
+@exec_bp.route('/grasp_object', methods=['POST'])
+def grasp_object():
+    payload = request.json or {}
+    force = payload.get('force', 100.0)
+    motion_service = current_app.config['motion_service']
+    if not motion_service.running:
+        return jsonify({"error": "MotionService not running"}), 500
+    motion_service.grasp_object(force)
+    return jsonify({"status": "grasping object", "force": force})
 

@@ -33,22 +33,25 @@ class JointCommand(Command):
 
 class GripperCommand(Command):
     """Command for gripper actions."""
-    def __init__(self, action: str, position: Optional[float] = None):
+    def __init__(self, action: str, position: Optional[float] = None, force: float = 50.0):
         self.action = action
         self.position = position
+        self.force = force
 
     def execute(self, driver) -> None:
         if self.action == 'open':
-            driver.open_gripper()
+            driver.open_gripper(self.force)
         elif self.action == 'close':
-            driver.close_gripper()
+            driver.close_gripper(self.force)
         elif self.action == 'set' and self.position is not None:
-            driver.set_gripper_position(self.position)
+            driver.set_gripper_position(self.position, self.force)
+        elif self.action == 'grasp':
+            driver.grasp_object(self.force)
 
     def get_description(self) -> str:
         if self.action == 'set':
-            return f"Gripper set: position={self.position}"
-        return f"Gripper {self.action}"
+            return f"Gripper set: position={self.position}, force={self.force}"
+        return f"Gripper {self.action}: force={self.force}"
 
 class MotionService:
     """
@@ -241,9 +244,11 @@ class MotionService:
         if "gripper" in commands:
             action = commands["gripper"]
             if action > 0:
-                self.driver.open_gripper()
+                # Opening - use moderate force
+                self.driver.open_gripper(force=50.0)
             elif action < 0:
-                self.driver.close_gripper()
+                # Closing - use moderate force
+                self.driver.close_gripper(force=50.0)
 
         self.driver.send_joint_targets(q_current, t_s=0.05)
 
@@ -271,7 +276,7 @@ class MotionService:
             event = {
                 "state": self.current_state,
                 "q": feedback.get("q", []),
-                "faults": feedback.get("faults", []),
+                "error": feedback.get("error", []),
                 "limits": feedback.get("limits", []),
                 "mode": "SIM" if isinstance(self.driver, SimDriver) else "HW"
             }
@@ -281,19 +286,24 @@ class MotionService:
         except Exception as e:
             logger.error(f"Error emitting status: {e}")
 
-    def open_gripper(self):
+    def open_gripper(self, force: float = 50.0):
         """Enqueue a command to open the gripper."""
-        cmd = GripperCommand('open')
+        cmd = GripperCommand('open', force=force)
         self.enqueue(cmd)
 
-    def close_gripper(self):
+    def close_gripper(self, force: float = 50.0):
         """Enqueue a command to close the gripper."""
-        cmd = GripperCommand('close')
+        cmd = GripperCommand('close', force=force)
         self.enqueue(cmd)
 
-    def set_gripper_position(self, position: float):
+    def set_gripper_position(self, position: float, force: float = 50.0):
         """Enqueue a command to set the gripper position."""
-        cmd = GripperCommand('set', position)
+        cmd = GripperCommand('set', position, force=force)
+        self.enqueue(cmd)
+
+    def grasp_object(self, force: float = 100.0):
+        """Enqueue a command to grasp an object with specified force."""
+        cmd = GripperCommand('grasp', force=force)
         self.enqueue(cmd)
 
     def send_joint_targets(self, q: List[float], duration_s: float = 1.0):

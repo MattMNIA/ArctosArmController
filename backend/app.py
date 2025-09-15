@@ -4,6 +4,8 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
+from api.teleop_routes import teleop_bp
+from api.status_routes import status_bp
 from core.drivers import composite_driver
 from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
@@ -17,10 +19,10 @@ def create_app():
     socketio.init_app(app)
     # Initialize Drivers
     pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
-    # can_driver = CanDriver()
+    can_driver = CanDriver()
     # comp_driver = composite_driver.CompositeDriver([pybullet_driver, can_driver])
     # Initialize MotionService
-    motion_service = MotionService(driver=pybullet_driver, loop_hz=50)
+    motion_service = MotionService(driver=can_driver, loop_hz=50)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
     app.config['motion_service'] = motion_service
     motion_service.start()
@@ -28,6 +30,8 @@ def create_app():
     # Register blueprints
     app.register_blueprint(ik_bp, url_prefix='/api/ik')
     app.register_blueprint(exec_bp, url_prefix='/api/execute')
+    app.register_blueprint(teleop_bp, url_prefix='/api/teleop')
+    app.register_blueprint(status_bp, url_prefix='/api/status')
 
     # Example WebSocket channel
     @socketio.on("connect")

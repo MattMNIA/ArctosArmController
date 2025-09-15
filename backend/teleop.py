@@ -1,4 +1,5 @@
 import argparse
+import utils.logger  # Import to trigger logging setup
 from core.motion_service import MotionService
 from core.drivers.can_driver import CanDriver
 from core.drivers.pybullet_driver import PyBulletDriver
@@ -12,7 +13,9 @@ def main():
     parser.add_argument("--input", choices=["xbox", "keyboard"], default="keyboard")
     args = parser.parse_args()
     pybullet_driver = PyBulletDriver(gui=True, urdf_path="C:\\Users\\mattm\\OneDrive - Iowa State University\\Personal Projects\\ArctosArm\\ArctosArmController\\backend\\models\\urdf\\arctos_urdf.urdf")
-    motion_service = MotionService(pybullet_driver, loop_hz=50)
+    can_driver = CanDriver()
+    comp_driver = CompositeDriver([pybullet_driver, can_driver])
+    motion_service = MotionService(comp_driver, loop_hz=500)
     motion_service.start()
     # Choose input method
     if args.input == "xbox":

@@ -22,11 +22,10 @@ def setup_logging(level=logging.DEBUG, component_levels=None):
         for component, comp_level in component_levels.items():
             logging.getLogger(component).setLevel(comp_level)
 
-# Call setup_logging with default settings
-# You can modify this dict to enable specific logging levels for components
+
 component_levels = {
     'api': logging.DEBUG,
-    'core.drivers.can_driver': logging.INFO, 
+    'core.drivers.can_driver': logging.DEBUG,
     'core.motion_service': logging.DEBUG, 
     'core.drivers.mks_servo_can.mks_servo': logging.INFO,
     'backend.core.drivers.mks_servo_can.mks_servo': logging.INFO,
