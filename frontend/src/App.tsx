@@ -1,14 +1,44 @@
-import { Routes, Route } from 'react-router-dom'
-import RobotControl from './pages/RobotControl'
-import MotorStatus from './pages/MotorStatus'
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ThemeProvider } from './components/ThemeProvider';
+import Navigation from './components/Navigation';
+import RobotControl from './pages/RobotControl';
+import MotorStatus from './pages/MotorStatus';
 
 function App() {
+  const [currentPage, setCurrentPage] = useState('control');
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'status':
+        return <MotorStatus />;
+      case 'control':
+      default:
+        return <RobotControl />;
+    }
+  };
+
   return (
-    <Routes>
-      <Route path="/" element={<RobotControl />} />
-      <Route path="/status" element={<MotorStatus />} />
-    </Routes>
-  )
+    <ThemeProvider>
+      <div className="min-h-screen">
+        <Navigation currentPage={currentPage} onNavigate={setCurrentPage} />
+        
+        <main className="pt-16">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentPage}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+            >
+              {renderPage()}
+            </motion.div>
+          </AnimatePresence>
+        </main>
+      </div>
+    </ThemeProvider>
+  );
 }
 
-export default App
+export default App;

@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { motion } from 'framer-motion';
+import { Activity, AlertCircle, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import io, { Socket } from 'socket.io-client';
+import MotorCard from '../components/MotorCard';
 
 interface MotorStatus {
   state: string;
@@ -12,72 +16,353 @@ export default function MotorStatusPage() {
   const [status, setStatus] = useState<MotorStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
+
+  const connectToSocket = () => {
+    // Disconnect existing socket if any
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
+
+    setLoading(true);
+    setReconnecting(true);
+    setError(null);
+
+    const socket = io('http://localhost:5000', {
+      transports: ['websocket', 'polling'],
+      timeout: 5000,
+      forceNew: true
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setLoading(false);
+      setReconnecting(false);
+      setError(null);
+      setConnected(true);
+    });
+
+    socket.on('disconnect', (reason) => {
+      setError(`Disconnected from server: ${reason}`);
+      setConnected(false);
+      setLoading(false);
+      setReconnecting(false);
+    });
+
+    socket.on('telemetry', (data: MotorStatus) => {
+      setStatus(data);
+      setLoading(false);
+    });
+
+    socket.on('connect_error', (err) => {
+      setError('Failed to connect to backend server. Please ensure the backend is running.');
+      setLoading(false);
+      setConnected(false);
+      setReconnecting(false);
+    });
+
+    // Set a timeout for connection attempt
+    setTimeout(() => {
+      if (!socket.connected) {
+        setError('Connection timeout. Backend server may not be running.');
+        setLoading(false);
+        setReconnecting(false);
+      }
+    }, 10000);
+  };
 
   useEffect(() => {
-    async function fetchStatus() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/status");
-        if (!res.ok) throw new Error("Failed to fetch status");
-        const data = await res.json();
-        setStatus(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+    connectToSocket();
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
       }
-    }
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 1000);
-    return () => clearInterval(interval);
+    };
   }, []);
 
+  const isEnabled = status ? ['RUNNING', 'EXECUTING'].includes(status.state) : false;
+
+  // Container animation variants
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Motor Status</h1>
-      {loading && <div>Loading...</div>}
-      {error && <div className="text-red-500">{error}</div>}
-      {status && (
-        <div className="space-y-4">
-          <div>
-            <span className="font-semibold">System State:</span> {status.state}
-          </div>
-          <div>
-            <span className="font-semibold">Mode:</span> {status.mode}
-          </div>
-          <div>
-            <span className="font-semibold">Joint Positions (q):</span>
-            <ul className="list-disc ml-6">
-              {status.q.map((val, idx) => (
-                <li key={idx}>
-                  <span className="font-semibold">Motor {idx + 1}:</span> {val.toFixed(3)}
+    <section className="py-8 min-h-screen">
+      <div className="max-w-6xl mx-auto px-6">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="text-center mb-12"
+        >
+          <h1 className="text-3xl md:text-4xl font-bold mb-4">
+            <span className="text-white">
+              Motor Status Dashboard
+            </span>
+          </h1>
+          <div className="h-1 w-20 bg-blue-500 mx-auto mb-6 rounded-full"></div>
+          
+          {/* Connection Status */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="flex items-center justify-center space-x-2 mb-6"
+          >
+            {connected ? (
+              <>
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                >
+                  <Wifi className="w-5 h-5 text-green-400" />
+                </motion.div>
+                <span className="text-sm font-semibold text-green-400">
+                  Connected • Mode: {status?.mode || 'Unknown'}
+                </span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-5 h-5 text-red-400" />
+                <span className="text-sm font-semibold text-red-400">
+                  Disconnected
+                </span>
+              </>
+            )}
+          </motion.div>
+
+          <p className="text-lg text-gray-300 max-w-2xl mx-auto">
+            Real-time monitoring of robotic arm joint positions, status indicators, and limit switches
+          </p>
+        </motion.div>
+
+        {/* Loading State */}
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center justify-center py-24"
+          >
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"
+            />
+            <span className="ml-4 text-gray-400">Connecting to motors...</span>
+          </motion.div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-red-900/20 border border-red-800 rounded-2xl p-6 mb-8"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <AlertCircle className="w-6 h-6 text-red-400" />
+                <div>
+                  <h3 className="font-semibold text-red-400">Connection Error</h3>
+                  <p className="text-red-300">{error}</p>
+                </div>
+              </div>
+              <motion.button
+                onClick={connectToSocket}
+                disabled={reconnecting}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="flex items-center space-x-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg font-semibold transition-colors duration-200 disabled:cursor-not-allowed"
+              >
+                <motion.div
+                  animate={reconnecting ? { rotate: 360 } : {}}
+                  transition={{ duration: 1, repeat: reconnecting ? Infinity : 0, ease: "linear" }}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </motion.div>
+                <span>{reconnecting ? 'Reconnecting...' : 'Retry Connection'}</span>
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* System Status Bar */}
+        {status && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-gray-800 rounded-2xl p-6 mb-8 border border-gray-700 shadow-lg"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <Activity className="w-6 h-6 text-blue-400" />
+                <div>
+                  <h3 className="font-semibold text-white">System State</h3>
+                  <p className="text-sm text-gray-400">Overall robot status</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+                  isEnabled
+                    ? 'bg-green-900/30 text-green-400'
+                    : 'bg-gray-700 text-gray-400'
+                }`}>
+                  {status.state}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Motor Cards Grid */}
+        {connected && status && status.q ? (
+          <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {status.q.map((position, idx) => {
+              const limit = status.limits?.[idx] || [false, false];
+              const topLimitHit = limit[0] || false;
+              const bottomLimitHit = limit[1] || false;
+              
+              return (
+                <MotorCard
+                  key={idx}
+                  motorIndex={idx}
+                  position={position}
+                  isEnabled={isEnabled}
+                  topLimitHit={topLimitHit}
+                  bottomLimitHit={bottomLimitHit}
+                />
+              );
+            })}
+          </motion.div>
+        ) : !loading && (
+          // Show placeholder cards when disconnected
+          <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: idx * 0.1 }}
+                className="relative bg-gray-800/50 rounded-3xl border-2 border-dashed border-gray-600 p-8 opacity-50"
+              >
+                {/* Overlay indicating disconnection */}
+                <div className="absolute inset-0 bg-gray-900/80 rounded-3xl flex items-center justify-center">
+                  <div className="text-center">
+                    <WifiOff className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-gray-400">
+                      Motor {idx + 1}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Disconnected
+                    </p>
+                  </div>
+                </div>
+
+                {/* Placeholder card structure (dimmed) */}
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gray-600 rounded-2xl flex items-center justify-center">
+                      <span className="text-gray-400 font-bold text-sm">
+                        {idx + 1}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-500">
+                        Motor {idx + 1}
+                      </h3>
+                      <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
+                        Joint Controller
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-4 h-4 rounded-full bg-gray-600" />
+                </div>
+
+                <div className="bg-gray-700 rounded-2xl p-4 mb-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-500 mb-1">Position</p>
+                      <div className="text-3xl font-black text-gray-500">
+                        --°
+                      </div>
+                    </div>
+                    <div className="w-12 h-12 bg-gray-600 rounded-xl" />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold text-gray-500">Limit Switches</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-gray-700 rounded-xl p-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-5 h-5 rounded-full bg-gray-600" />
+                        <div>
+                          <p className="text-sm font-semibold text-gray-500">Top</p>
+                          <p className="text-xs font-medium text-gray-500">--</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-gray-700 rounded-xl p-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-5 h-5 rounded-full bg-gray-600" />
+                        <div>
+                          <p className="text-sm font-semibold text-gray-500">Bottom</p>
+                          <p className="text-xs font-medium text-gray-500">--</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+
+        {/* Error Display */}
+        {status && status.error && status.error.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="mt-8 bg-red-900/20 border border-red-800 rounded-2xl p-6"
+          >
+            <div className="flex items-center space-x-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-red-400" />
+              <h3 className="text-lg font-semibold text-red-400">System Errors</h3>
+            </div>
+            <ul className="space-y-2">
+              {status.error.map((err, idx) => (
+                <li key={idx} className="text-red-300 font-medium">
+                  • {JSON.stringify(err)}
                 </li>
               ))}
             </ul>
-          </div>
-          {status.error && status.error.length > 0 && (
-            <div>
-              <span className="font-semibold text-red-600">Errors:</span>
-              <ul className="list-disc ml-6 text-red-600">
-                {status.error.map((err, idx) => (
-                  <li key={idx}>{JSON.stringify(err)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {status.limits && status.limits.length > 0 && (
-            <div>
-              <span className="font-semibold text-yellow-600">Limits:</span>
-              <ul className="list-disc ml-6 text-yellow-600">
-                {status.limits.map((lim, idx) => (
-                  <li key={idx}>{JSON.stringify(lim)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+          </motion.div>
+        )}
+      </div>
+    </section>
   );
 }

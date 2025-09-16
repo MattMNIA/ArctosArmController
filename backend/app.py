@@ -18,11 +18,12 @@ def create_app():
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
     # Initialize Drivers
-    pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
+    sim_driver = SimDriver()
+    # pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
     can_driver = CanDriver()
     # comp_driver = composite_driver.CompositeDriver([pybullet_driver, can_driver])
     # Initialize MotionService
-    motion_service = MotionService(driver=can_driver, loop_hz=50)
+    motion_service = MotionService(driver=sim_driver, loop_hz=50)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
     app.config['motion_service'] = motion_service
     motion_service.start()

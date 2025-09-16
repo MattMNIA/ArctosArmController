@@ -4,7 +4,7 @@ import logging
 status_bp = Blueprint('status', __name__)
 
 
-@status_bp.route('/status', methods=['GET'])
+@status_bp.route('', methods=['GET'])
 def get_status():
     motion_service = current_app.config['motion_service']
     if not motion_service.running:

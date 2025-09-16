@@ -1,5 +1,6 @@
 import pygame
 from core.input.base_input import InputController
+from typing import cast, List
 
 
 class XboxController(InputController):
@@ -49,7 +50,8 @@ class XboxController(InputController):
                 if isinstance(joint, int):
                     commands[joint] = commands.get(joint, 0.0) + val * scale
                 elif isinstance(joint, list):
-                    for j in joint:
+                    joint_list = cast(List[int], joint)
+                    for j in joint_list:
                         commands[j] = commands.get(j, 0.0) + val * scale
 
         # Process triggers
@@ -62,7 +64,8 @@ class XboxController(InputController):
         for btn, (joint, scale) in self.button_map.items():
             if self.joystick.get_button(btn):
                 if isinstance(joint, list):
-                    for j in joint:
+                    joint_list = cast(List[int], joint)
+                    for j in joint_list:
                         commands[j] = commands.get(j, 0.0) + scale
                 elif isinstance(joint, int):
                     commands[joint] = commands.get(joint, 0.0) + scale
@@ -70,3 +73,30 @@ class XboxController(InputController):
                     commands["gripper"] = commands.get("gripper", 0.0) + scale
 
         return commands
+
+    def get_events(self):
+        """Return a list of events: ('press' or 'release', joint, scale)"""
+        pygame.event.pump()
+        events = []
+        for event in pygame.event.get():
+            if event.type == pygame.JOYBUTTONDOWN:
+                btn = event.button
+                if btn in self.button_map:
+                    joint, scale = self.button_map[btn]
+                    if isinstance(joint, list):
+                        joint_list = cast(List[int], joint)
+                        for j in joint_list:
+                            events.append(('press', j, scale))
+                    else:
+                        events.append(('press', joint, scale))
+            elif event.type == pygame.JOYBUTTONUP:
+                btn = event.button
+                if btn in self.button_map:
+                    joint, scale = self.button_map[btn]
+                    if isinstance(joint, list):
+                        joint_list = cast(List[int], joint)
+                        for j in joint_list:
+                            events.append(('release', j, scale))
+                    else:
+                        events.append(('release', joint, scale))
+        return events

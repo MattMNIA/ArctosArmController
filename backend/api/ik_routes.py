@@ -6,7 +6,11 @@ ik_bp = Blueprint('ik', __name__)
 
 @ik_bp.route('/solve', methods=['POST'])
 def solve_ik():
-    data = request.json
+    try:
+        data = request.get_json(silent=True)
+    except Exception as e:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+    
     if not data:
         return jsonify({"error": "No data"}), 400
     target_pose = data.get("pose")

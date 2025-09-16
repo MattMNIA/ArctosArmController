@@ -1,6 +1,7 @@
 import pygame
 from core.input.base_input import InputController
 import logging
+from typing import cast, List
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ class KeyboardController(InputController):
         for key in current_pressed:
             joint, scale = self.keymap[key]
             if isinstance(joint, list):  # multiple joints (5+6)
-                for j in joint:
+                joint_list = cast(List[int], joint)
+                for j in joint_list:
                     commands[j] = commands.get(j, 0.0) + scale * self.all_scale
             elif isinstance(joint, int):  # single joint
                 commands[joint] = commands.get(joint, 0.0) + scale * self.all_scale
@@ -56,3 +58,28 @@ class KeyboardController(InputController):
 
         self.last_pressed = current_pressed
         return commands
+
+    def get_events(self):
+        """Return a list of events: ('press' or 'release', joint, scale)"""
+        pygame.event.pump()
+        events = []
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN and event.key in self.keymap:
+                joint, scale = self.keymap[event.key]
+                scaled_scale = scale * self.all_scale
+                if isinstance(joint, list):
+                    joint_list = cast(List[int], joint)
+                    for j in joint_list:
+                        events.append(('press', j, scaled_scale))
+                else:
+                    events.append(('press', joint, scaled_scale))
+            elif event.type == pygame.KEYUP and event.key in self.keymap:
+                joint, scale = self.keymap[event.key]
+                scaled_scale = scale * self.all_scale
+                if isinstance(joint, list):
+                    joint_list = cast(List[int], joint)
+                    for j in joint_list:
+                        events.append(('release', j, scaled_scale))
+                else:
+                    events.append(('release', joint, scaled_scale))
+        return events

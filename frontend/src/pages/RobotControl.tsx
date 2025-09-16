@@ -1,44 +1,115 @@
-// src/pages/RobotControl.tsx
-import { useState, useEffect } from "react";
-import io from "socket.io-client";
-
-const socket = io("http://localhost:5000");
+import { useState, useEffect, useRef } from "react";
+import { motion } from 'framer-motion';
+import { Play, Calculator, Grip, Hand, Settings2, Wifi, WifiOff, AlertCircle, RefreshCw } from 'lucide-react';
+import io, { Socket } from "socket.io-client";
 
 export default function RobotControl() {
   const [msg, setMsg] = useState("Connecting...");
   const [jointInputs, setJointInputs] = useState<string[]>(['0','0','0','0','0','0']);
+  const [gripperInput, setGripperInput] = useState<string>('0.0');
+  const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
+
+  const connectToSocket = () => {
+    // Disconnect existing socket if any
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
+
+    setReconnecting(true);
+    setConnectionError(null);
+    setMsg("Connecting...");
+
+    const socket = io("http://localhost:5000", {
+      transports: ['websocket', 'polling'],
+      timeout: 5000,
+      forceNew: true
+    });
+
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      setMsg("Connected to backend");
+      setConnected(true);
+      setConnectionError(null);
+      setReconnecting(false);
+    });
+
+    socket.on("disconnect", (reason) => {
+      setConnected(false);
+      setConnectionError(`Disconnected: ${reason}`);
+      setMsg("Disconnected from backend");
+      setReconnecting(false);
+    });
+
+    socket.on("connect_error", (err) => {
+      setConnected(false);
+      setConnectionError("Failed to connect to backend server");
+      setMsg("Connection failed");
+      setReconnecting(false);
+    });
+
+    socket.on("status", (data: any) => setMsg(data.msg));
+
+    // Set a timeout for connection attempt
+    setTimeout(() => {
+      if (!socket.connected) {
+        setConnectionError("Connection timeout. Backend server may not be running.");
+        setReconnecting(false);
+      }
+    }, 10000);
+  };
 
   useEffect(() => {
-    socket.on("connect", () => setMsg("Connected to backend"));
-    socket.on("status", (data: any) => setMsg(data.msg));
+    connectToSocket();
+
     return () => {
-      socket.off("connect");
-      socket.off("status");
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
   }, []);
 
   const sendIK = async () => {
-    const jointValues = jointInputs.map(j => parseFloat(j) || 0);
-    const res = await fetch("http://localhost:5000/api/ik/solve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pose: { position: [0.3, 0.1, 0.2], orientation: [0,0,0,1] }, seed: jointValues.map((j: number) => j * Math.PI / 180) })
-    });
-    const data = await res.json();
-    const newJoints = (data.joints as number[]).map((j: number) => j * 180 / Math.PI);
-    setJointInputs(newJoints.map(j => j.toString()));
+    setLoading(true);
+    try {
+      const jointValues = jointInputs.map(j => parseFloat(j) || 0);
+      const res = await fetch("http://localhost:5000/api/ik/solve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          pose: { position: [0.3, 0.1, 0.2], orientation: [0,0,0,1] }, 
+          seed: jointValues.map((j: number) => j * Math.PI / 180) 
+        })
+      });
+      const data = await res.json();
+      const newJoints = (data.joints as number[]).map((j: number) => j * 180 / Math.PI);
+      setJointInputs(newJoints.map(j => j.toString()));
+    } catch (error) {
+      console.error("IK solve failed:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const executeMove = async () => {
-    const jointValues = jointInputs.map(j => parseFloat(j) || 0);
-    await fetch("http://localhost:5000/api/execute/joints", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: jointValues.map((j: number) => j * Math.PI / 180) })
-    });
+    setLoading(true);
+    try {
+      const jointValues = jointInputs.map(j => parseFloat(j) || 0);
+      await fetch("http://localhost:5000/api/execute/joints", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q: jointValues.map((j: number) => j * Math.PI / 180) })
+      });
+    } catch (error) {
+      console.error("Execute move failed:", error);
+    } finally {
+      setLoading(false);
+    }
   };
-
-  const [gripperInput, setGripperInput] = useState<string>('0.0');
 
   const openGripper = async () => {
     try {
@@ -85,66 +156,265 @@ export default function RobotControl() {
   };
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-xl font-bold">Robotic Arm Control</h1>
-      <p>Status: {msg}</p>
-      <div>
-        <h2 className="font-semibold">Joints</h2>
-        {jointInputs.map((input, index) => (
-          <div key={index} className="flex items-center gap-2">
-            <label>Joint {index + 1} (degrees):</label>
-            <input
-              type="number"
-              step="0.01"
-              min="-180"
-              max="180"
-              placeholder="e.g. 45"
-              value={input}
-              onChange={(e) => {
-                const newInputs = [...jointInputs];
-                newInputs[index] = e.target.value;
-                setJointInputs(newInputs);
-              }}
-              className="border p-1"
-            />
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={sendIK}>
-          Solve IK
-        </button>
-        <button className="px-4 py-2 bg-green-500 text-white rounded" onClick={executeMove}>
-          Execute
-        </button>
-      </div>
-      <div>
-        <h2 className="font-semibold">Gripper Control</h2>
-        <div className="flex gap-2">
-          <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={openGripper}>
-            Open Gripper
-          </button>
-          <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={closeGripper}>
-            Close Gripper
-          </button>
+    <section className="py-8 min-h-screen">
+      <div className="max-w-6xl mx-auto px-6">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="text-center mb-12"
+        >
+          <h1 className="text-3xl md:text-4xl font-bold mb-4">
+            <span className="text-white">
+              Robotic Arm Control Center
+            </span>
+          </h1>
+          <div className="h-1 w-20 bg-blue-500 mx-auto mb-6 rounded-full"></div>
+          
+          {/* Connection Status */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="flex items-center justify-center space-x-2 mb-6"
+          >
+            {connected ? (
+              <>
+                <Wifi className="w-5 h-5 text-green-400" />
+                <span className="text-sm font-semibold text-green-400">
+                  {msg}
+                </span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-5 h-5 text-red-400" />
+                <span className="text-sm font-semibold text-red-400">
+                  Disconnected
+                </span>
+              </>
+            )}
+          </motion.div>
+
+          <p className="text-lg text-gray-300 max-w-2xl mx-auto">
+            Precision control interface for joint positioning and gripper operations
+          </p>
+        </motion.div>
+
+        <div className="grid md:grid-cols-2 gap-8">
+          {/* Joint Control Section */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="bg-gray-800 rounded-3xl shadow-lg border border-gray-700/50 p-8"
+          >
+            <div className="flex items-center space-x-3 mb-6">
+              <motion.div 
+                whileHover={{ rotate: 180 }}
+                transition={{ duration: 0.5 }}
+                className="w-10 h-10 bg-gray-700 rounded-2xl flex items-center justify-center"
+              >
+                <Settings2 className="w-5 h-5 text-blue-400" />
+              </motion.div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Joint Control</h2>
+                <p className="text-sm text-gray-400">Configure individual joint angles</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {jointInputs.map((input, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="flex items-center space-x-4"
+                >
+                  <label className="text-sm font-semibold text-gray-300 w-20">
+                    Joint {index + 1}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="-180"
+                    max="180"
+                    placeholder="0.00"
+                    value={input}
+                    onChange={(e) => {
+                      const newInputs = [...jointInputs];
+                      newInputs[index] = e.target.value;
+                      setJointInputs(newInputs);
+                    }}
+                    className="flex-1 px-4 py-3 rounded-xl border border-gray-600 bg-gray-700 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                  <span className="text-sm text-gray-400 w-8">°</span>
+                </motion.div>
+              ))}
+            </div>
+
+            <div className="flex gap-4 mt-8">
+              <motion.button
+                onClick={sendIK}
+                disabled={loading || !connected}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex-1 flex items-center justify-center space-x-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              >
+                <Calculator className="w-5 h-5" />
+                <span>{loading ? 'Solving...' : 'Solve IK'}</span>
+              </motion.button>
+              
+              <motion.button
+                onClick={executeMove}
+                disabled={loading || !connected}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex-1 flex items-center justify-center space-x-2 px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              >
+                <Play className="w-5 h-5" />
+                <span>{loading ? 'Executing...' : 'Execute'}</span>
+              </motion.button>
+            </div>
+          </motion.div>
+
+          {/* Gripper Control Section */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, delay: 0.4 }}
+            className="bg-gray-800 rounded-3xl shadow-lg border border-gray-700/50 p-8"
+          >
+            <div className="flex items-center space-x-3 mb-6">
+              <motion.div 
+                whileHover={{ scale: 1.1 }}
+                className="w-10 h-10 bg-gray-700 rounded-2xl flex items-center justify-center"
+              >
+                <Hand className="w-5 h-5 text-blue-400" />
+              </motion.div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Gripper Control</h2>
+                <p className="text-sm text-gray-400">End-effector operations</p>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              {/* Quick Actions */}
+              <div className="grid grid-cols-2 gap-4">
+                <motion.button
+                  onClick={openGripper}
+                  disabled={!connected}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center justify-center space-x-2 px-6 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                >
+                  <Grip className="w-5 h-5" />
+                  <span>Open</span>
+                </motion.button>
+                
+                <motion.button
+                  onClick={closeGripper}
+                  disabled={!connected}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center justify-center space-x-2 px-6 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                >
+                  <Grip className="w-5 h-5 rotate-90" />
+                  <span>Close</span>
+                </motion.button>
+              </div>
+
+              {/* Precise Control */}
+              <div className="bg-gray-900/50 rounded-2xl p-6 border border-gray-700/50">
+                <h3 className="text-lg font-semibold text-white mb-4">Precise Position</h3>
+                <div className="flex items-center space-x-4">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    placeholder="0.50"
+                    value={gripperInput}
+                    onChange={(e) => setGripperInput(e.target.value)}
+                    className="flex-1 px-4 py-3 rounded-xl border border-gray-600 bg-gray-700 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                  <motion.button
+                    onClick={setGripper}
+                    disabled={!connected}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                  >
+                    Set
+                  </motion.button>
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                  Range: 0.0 (fully open) to 1.0 (fully closed)
+                </p>
+              </div>
+            </div>
+          </motion.div>
         </div>
-        <div className="flex items-center gap-2 mt-2">
-          <label>Set Position:</label>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            max="1"
-            placeholder="e.g. 0.5"
-            value={gripperInput}
-            onChange={(e) => setGripperInput(e.target.value)}
-            className="border p-1"
-          />
-          <button className="px-4 py-2 bg-purple-500 text-white rounded" onClick={setGripper}>
-            Set
-          </button>
-        </div>
+
+        {/* Connection Error Alert */}
+        {connectionError && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+            className="mt-8 bg-red-900/20 border border-red-800 rounded-2xl p-6"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <AlertCircle className="w-6 h-6 text-red-400" />
+                <div>
+                  <h3 className="font-semibold text-red-400">Connection Error</h3>
+                  <p className="text-red-300">{connectionError}</p>
+                  <p className="text-sm text-red-400 mt-1">
+                    Please ensure the backend server is running to control the robotic arm.
+                  </p>
+                </div>
+              </div>
+              <motion.button
+                onClick={connectToSocket}
+                disabled={reconnecting}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="flex items-center space-x-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg font-semibold transition-colors duration-200 disabled:cursor-not-allowed"
+              >
+                <motion.div
+                  animate={reconnecting ? { rotate: 360 } : {}}
+                  transition={{ duration: 1, repeat: reconnecting ? Infinity : 0, ease: "linear" }}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </motion.div>
+                <span>{reconnecting ? 'Reconnecting...' : 'Retry Connection'}</span>
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Status Alert for Disconnection */}
+        {!connected && !connectionError && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+            className="mt-8 bg-yellow-900/20 border border-yellow-800 rounded-2xl p-6"
+          >
+            <div className="flex items-center space-x-3">
+              <AlertCircle className="w-6 h-6 text-yellow-400" />
+              <div>
+                <h3 className="font-semibold text-yellow-400">Connection Required</h3>
+                <p className="text-yellow-300">
+                  Attempting to connect to backend server...
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </div>
-    </div>
+    </section>
   );
 }

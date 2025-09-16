@@ -1,7 +1,7 @@
 import threading
 import time
 import queue
-from typing import Dict, Any, List, Optional, Callable, Protocol
+from typing import Dict, Any, List, Optional, Callable, Protocol, Union
 import logging
 from abc import ABC, abstractmethod
 from core.drivers.sim_driver import SimDriver
@@ -229,30 +229,6 @@ class MotionService:
             with self._command_lock:
                 self._current_command = None
                 
-    def teleop_step(self, input_controller):
-        commands = input_controller.get_commands()
-
-        feedback = self.driver.get_feedback()
-        q_current = list(feedback.get("q", []))
-
-        # Apply joint deltas
-        for j, delta in commands.items():
-            if isinstance(j, int) and j < len(q_current):
-                q_current[j] += delta * 0.01  # scale for smoothness
-
-        # Handle gripper commands
-        if "gripper" in commands:
-            action = commands["gripper"]
-            if action > 0:
-                # Opening - use moderate force
-                self.driver.open_gripper(force=50.0)
-            elif action < 0:
-                # Closing - use moderate force
-                self.driver.close_gripper(force=50.0)
-
-        self.driver.send_joint_targets(q_current, t_s=0.05)
-
-
     def _check_command_completion(self):
         """Check if the current command has completed."""
         with self._command_lock:
@@ -273,12 +249,23 @@ class MotionService:
                 self.paused = True
                 self.current_state = "LIMIT_HIT"
             
+            if isinstance(self.driver, SimDriver):
+                mode = "SIM"
+            elif self.driver.__class__.__name__ == "CanDriver":
+                mode = "CAN"
+            elif self.driver.__class__.__name__ == "PyBulletDriver":
+                mode = "TWIN"
+            elif self.driver.__class__.__name__ == "CompositeDriver":
+                mode = "COMPOSITE"
+            else:
+                mode = "?"
+
             event = {
                 "state": self.current_state,
                 "q": feedback.get("q", []),
                 "error": feedback.get("error", []),
                 "limits": feedback.get("limits", []),
-                "mode": "SIM" if isinstance(self.driver, SimDriver) else "HW"
+                "mode": mode
             }
             
             if self.ws_emit:

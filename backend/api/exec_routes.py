@@ -9,8 +9,12 @@ exec_bp = Blueprint('execute', __name__)
 
 @exec_bp.route('/joints', methods=['POST'])
 def execute():
-    payload = request.json
-    logger.debug("Received payload: %s", payload)
+    try:
+        payload = request.get_json(silent=True)
+    except Exception as e:
+        logger.error(f"Error parsing JSON for joints: {e}")
+        return jsonify({"error": "Invalid JSON payload"}), 400
+    
     if not payload:
         return jsonify({"error": "No payload"}), 400
     
@@ -33,7 +37,11 @@ def execute():
 
 @exec_bp.route('/open_gripper', methods=['POST'])
 def open_gripper():
-    payload = request.json or {}
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception as e:
+        logger.error(f"Error parsing JSON for open_gripper: {e}")
+        payload = {}
     force = payload.get('force', 50.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
@@ -43,7 +51,11 @@ def open_gripper():
 
 @exec_bp.route('/close_gripper', methods=['POST'])
 def close_gripper():
-    payload = request.json or {}
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception as e:
+        logger.error(f"Error parsing JSON for close_gripper: {e}")
+        payload = {}
     force = payload.get('force', 50.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
@@ -53,7 +65,12 @@ def close_gripper():
 
 @exec_bp.route('/set_gripper_position', methods=['POST'])
 def set_gripper_position():
-    payload = request.json
+    try:
+        payload = request.get_json(silent=True)
+    except Exception as e:
+        logger.error(f"Error parsing JSON for set_gripper_position: {e}")
+        return jsonify({"error": "Invalid JSON payload"}), 400
+    
     if not payload or 'position' not in payload:
         return jsonify({"error": "Missing 'position' in payload"}), 400
     position = payload['position']
@@ -68,7 +85,11 @@ def set_gripper_position():
 
 @exec_bp.route('/grasp_object', methods=['POST'])
 def grasp_object():
-    payload = request.json or {}
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception as e:
+        logger.error(f"Error parsing JSON for grasp_object: {e}")
+        payload = {}
     force = payload.get('force', 100.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
