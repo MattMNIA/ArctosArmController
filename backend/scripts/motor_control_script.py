@@ -6,10 +6,10 @@ import os
 import argparse
 
 # Add the backend path to sys.path so we can import the modules
-sys.path.append(os.path.join(os.path.dirname(__file__), 'backend', 'core', 'drivers'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from mks_servo_can.mks_servo import MksServo
-from mks_servo_can.mks_enums import Direction, Enable
+from core.drivers.mks_servo_can.mks_servo import MksServo
+from core.drivers.mks_servo_can.mks_enums import Direction, Enable
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

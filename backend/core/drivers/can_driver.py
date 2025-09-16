@@ -170,7 +170,9 @@ class CanDriver():
                     servo = mks_servo.MksServo(self.bus, notifier, i)
                     
                     # Add timeout for servo initialization
-                    servo.enable_motor(Enable.Enable)
+                    enable_result = servo.enable_motor(Enable.Enable)
+                    if enable_result is None:
+                        raise RuntimeError(f"Failed to enable servo ID {i}")
                     self.servos.append(servo)
                     logger.debug(f"✅ Servo {i} initialized.")
                     

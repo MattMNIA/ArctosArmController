@@ -7,6 +7,8 @@ import time
 import logging
 
 from core.drivers.mks_servo_can import MksServo
+from core.drivers.mks_servo_can.mks_enums import Enable, Direction
+
 
 # Stock slcan firmware on Windows
 bus = can.interface.Bus(interface="slcan", channel="COM4", bitrate=500000)
@@ -171,7 +173,7 @@ print("---- 6.2.1 Query the motor status ----")
 print(servo.query_motor_status())
 
 print("---- 6.2.2 Enable motor command ----")
-print(servo.enable_motor(True))
+print(servo.enable_motor(Enable.Enable))
 
 print("---- 6.2.3 Emergency stop the motor ----")
 print(servo.emergency_stop_motor())
