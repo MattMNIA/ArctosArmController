@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from "react";
-import { motion } from 'framer-motion';
 import { AlertCircle, Wifi, WifiOff, RefreshCw, Activity } from 'lucide-react';
 import io, { Socket } from 'socket.io-client';
 import MotorCard from '../components/MotorCard';
 import JointControl from '../components/JointControl';
+import GripperControl from '../components/GripperControl';
 
 interface MotorStatus {
   state: string;
@@ -20,6 +20,7 @@ export default function ArmDashboard() {
   const [reconnecting, setReconnecting] = useState(false);
   const [jointInputs, setJointInputs] = useState<string[]>(['0','0','0','0','0','0']);
   const [jointLoading, setJointLoading] = useState(false);
+  const [gripperInput, setGripperInput] = useState<string>('0.5');
   const socketRef = useRef<Socket | null>(null);
 
   const connectToSocket = () => {
@@ -59,7 +60,7 @@ export default function ArmDashboard() {
       setLoading(false);
     });
 
-    socket.on('connect_error', (err) => {
+    socket.on('connect_error', (_err) => {
       setError('Failed to connect to backend server. Please ensure the backend is running.');
       setLoading(false);
       setConnected(false);
@@ -121,6 +122,43 @@ export default function ArmDashboard() {
       console.error("Execute move failed:", error);
     } finally {
       setJointLoading(false);
+    }
+  };
+
+  const openGripper = async () => {
+    try {
+      await fetch("http://localhost:5000/api/execute/gripper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position: 0.0 })
+      });
+    } catch (error) {
+      console.error("Open gripper failed:", error);
+    }
+  };
+
+  const closeGripper = async () => {
+    try {
+      await fetch("http://localhost:5000/api/execute/gripper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position: 1.0 })
+      });
+    } catch (error) {
+      console.error("Close gripper failed:", error);
+    }
+  };
+
+  const setGripperPosition = async () => {
+    try {
+      const position = parseFloat(gripperInput) || 0.5;
+      await fetch("http://localhost:5000/api/execute/gripper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position })
+      });
+    } catch (error) {
+      console.error("Set gripper position failed:", error);
     }
   };
 
@@ -301,9 +339,10 @@ export default function ArmDashboard() {
             )}
           </div>
 
-          {/* Joint Control - Full Width */}
-          <div className="flex">
-            <div className="w-full">
+          {/* Control Panel - Two Column Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Joint Control */}
+            <div className="h-full">
               <JointControl
                 jointInputs={jointInputs}
                 setJointInputs={setJointInputs}
@@ -311,6 +350,18 @@ export default function ArmDashboard() {
                 loading={jointLoading}
                 onSolveIK={sendIK}
                 onExecuteMove={executeMove}
+              />
+            </div>
+
+            {/* Gripper Control */}
+            <div className="h-full">
+              <GripperControl
+                gripperInput={gripperInput}
+                setGripperInput={setGripperInput}
+                connected={connected}
+                onOpenGripper={openGripper}
+                onCloseGripper={closeGripper}
+                onSetGripper={setGripperPosition}
               />
             </div>
           </div>
