@@ -16,7 +16,6 @@ def get_status():
         "state": motion_service.current_state,
         "q": feedback.get("q", []),
         "error": feedback.get("error", []),
-        "limits": feedback.get("limits", []),
-        "mode": "SIM" if motion_service.driver.__class__.__name__ == "SimDriver" else "HW"
+        "limits": feedback.get("limits", [])
     }
     return jsonify(event)

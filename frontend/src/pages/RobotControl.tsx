@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from 'framer-motion';
-import { Play, Calculator, Grip, Hand, Settings2, Wifi, WifiOff, AlertCircle, RefreshCw } from 'lucide-react';
+import { Grip, Hand, Wifi, WifiOff, AlertCircle, RefreshCw } from 'lucide-react';
 import io, { Socket } from "socket.io-client";
+import JointControl from '../components/JointControl';
 
 export default function RobotControl() {
   const [msg, setMsg] = useState("Connecting...");
@@ -203,81 +204,14 @@ export default function RobotControl() {
 
         <div className="grid md:grid-cols-2 gap-8">
           {/* Joint Control Section */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="bg-gray-800 rounded-3xl shadow-lg border border-gray-700/50 p-8"
-          >
-            <div className="flex items-center space-x-3 mb-6">
-              <motion.div 
-                whileHover={{ rotate: 180 }}
-                transition={{ duration: 0.5 }}
-                className="w-10 h-10 bg-gray-700 rounded-2xl flex items-center justify-center"
-              >
-                <Settings2 className="w-5 h-5 text-blue-400" />
-              </motion.div>
-              <div>
-                <h2 className="text-2xl font-bold text-white">Joint Control</h2>
-                <p className="text-sm text-gray-400">Configure individual joint angles</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {jointInputs.map((input, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="flex items-center space-x-4"
-                >
-                  <label className="text-sm font-semibold text-gray-300 w-20">
-                    Joint {index + 1}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="-180"
-                    max="180"
-                    placeholder="0.00"
-                    value={input}
-                    onChange={(e) => {
-                      const newInputs = [...jointInputs];
-                      newInputs[index] = e.target.value;
-                      setJointInputs(newInputs);
-                    }}
-                    className="flex-1 px-4 py-3 rounded-xl border border-gray-600 bg-gray-700 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                  <span className="text-sm text-gray-400 w-8">°</span>
-                </motion.div>
-              ))}
-            </div>
-
-            <div className="flex gap-4 mt-8">
-              <motion.button
-                onClick={sendIK}
-                disabled={loading || !connected}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 flex items-center justify-center space-x-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-              >
-                <Calculator className="w-5 h-5" />
-                <span>{loading ? 'Solving...' : 'Solve IK'}</span>
-              </motion.button>
-              
-              <motion.button
-                onClick={executeMove}
-                disabled={loading || !connected}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 flex items-center justify-center space-x-2 px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-              >
-                <Play className="w-5 h-5" />
-                <span>{loading ? 'Executing...' : 'Execute'}</span>
-              </motion.button>
-            </div>
-          </motion.div>
+          <JointControl
+            jointInputs={jointInputs}
+            setJointInputs={setJointInputs}
+            connected={connected}
+            loading={loading}
+            onSolveIK={sendIK}
+            onExecuteMove={executeMove}
+          />
 
           {/* Gripper Control Section */}
           <motion.div

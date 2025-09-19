@@ -10,6 +10,8 @@ import yaml
 from pathlib import Path
 from typing import cast
 from can import BusABC
+
+from .mks_servo_can.mks_enums import EnableStatus
 from .mks_servo_can import mks_servo
 from .mks_servo_can.mks_servo import Enable
 from utils.config_manager import ConfigManager
@@ -29,7 +31,6 @@ class CanDriver():
         self.bitrate = self.config_manager.get('can_driver.bitrate', 500000)
         self.default_speed = self.config_manager.get('can_driver.default_speed', 500)
         self.default_acc = self.config_manager.get('can_driver.default_acc', 150)
-        self.auto_clear_limits = self.config_manager.get('can_driver.auto_clear_limits', False)
         
         # Communication timeout settings
         self.can_timeout = self.config_manager.get('can_driver.can_timeout', 2.0)
@@ -170,8 +171,9 @@ class CanDriver():
                     servo = mks_servo.MksServo(self.bus, notifier, i)
                     
                     # Add timeout for servo initialization
-                    enable_result = servo.enable_motor(Enable.Enable)
-                    if enable_result is None:
+                    servo.enable_motor(Enable.Enable)
+                    status = servo.read_en_pins_status()
+                    if status is not EnableStatus.Enabled:
                         raise RuntimeError(f"Failed to enable servo ID {i}")
                     self.servos.append(servo)
                     logger.debug(f"✅ Servo {i} initialized.")
@@ -196,7 +198,6 @@ class CanDriver():
                     logger.debug(f"✅ Limit port enabled on Servo {index}")
                 except Exception as e:
                     logger.error(f"⚠️ Failed to enable limit port on Servo {index}: {e}")
-
         duration = time.time() - start_time
         logger.info(f"✅ {len(self.servos)} servos initialized in {duration:.2f} seconds.")
 
@@ -567,144 +568,13 @@ class CanDriver():
                 # Cancel any ongoing movements
                 self._cancel_pending_futures()
             
-            if self.auto_clear_limits:
-                logger.info("Auto-clearing limits enabled. Attempting to clear limits automatically.")
-                try:
-                    cleared = self.clear_limits()
-                    if cleared:
-                        logger.info("Limits cleared successfully.")
-                        self.limit_hit = False
-                        return False
-                    else:
-                        logger.error("Failed to clear limits automatically.")
-                        return True
-                except Exception as e:
-                    logger.error(f"Error during auto-clear limits: {e}")
-                    return True
-            else:
-                logger.error("Limit switch hit and joint stopped. Execution paused.")
-                return True
+            logger.error("Limit switch hit and joint stopped. Execution paused.")
+            return True
         else:
             if self.limit_hit:
                 logger.info("Limits cleared, resuming normal operation")
                 self.limit_hit = False
             return False
-
-    def clear_limits(self) -> bool:
-        """
-        Attempt to move servos away from hit limits with improved safety and error handling.
-        """
-        with self._servo_lock:
-            if not self.servos:
-                logger.error("No servos available for limit clearing")
-                return False
-        
-        feedback = self.get_feedback()
-        logger.debug(f"Limit clearing feedback: {feedback}")
-        limits = feedback.get("limits", [])
-        q = feedback.get("q", [])
-        
-        if not limits or not q:
-            logger.error("No feedback available for limit clearing")
-            return False
-        
-        delta = math.radians(1)  # 1 degree in radians
-        max_attempts = 10
-        success = True
-        
-        for i, lim in enumerate(limits):
-            if len(lim) < 2 or not any(lim):  # No limit hit or invalid data
-                continue
-            
-            # Determine direction to move away from limit
-            # Assuming lim[0] is min limit, lim[1] is max limit
-            if not lim[0]:  # Min limit hit
-                direction = 1  # Move positive
-            elif not lim[1]:  # Max limit hit
-                direction = -1  # Move negative
-            else:
-                continue  # No limit hit
-            
-            attempts = 0
-            current_angle = q[i]
-            
-            logger.info(f"Attempting to clear limit on servo {i+1} (direction: {direction})")
-            
-            while attempts < max_attempts:
-                new_angle = current_angle + direction * delta
-                logger.debug(f"Clearing limit on servo {i+1}, attempt {attempts+1}, moving to {math.degrees(new_angle):.2f}°")
-                
-                try:
-                    encoder_val = self.angle_to_encoder(new_angle, i)
-                    logger.debug(f"Servo {i+1}: Moving to encoder value {encoder_val}")
-                    with self._servo_lock:
-                        if i >= len(self.servos):
-                            logger.error(f"Servo index {i} out of range during limit clearing")
-                            success = False
-                            break
-                            
-                        result = self.servos[i].run_motor_absolute_motion_by_axis(
-                            self.default_speed // 2,  # Use slower speed for safety
-                            self.default_acc // 2,    # Use slower acceleration
-                            encoder_val
-                        )
-                        
-                        if result is None:
-                            logger.error(f"Failed to send clear command to servo {i+1}")
-                            success = False
-                            break
-                    
-                    # Wait for movement with timeout
-                    time.sleep(0.5)
-                    current_angle = new_angle
-                    
-                except Exception as e:
-                    logger.error(f"Error clearing limit on servo {i+1}: {e}")
-                    success = False
-                    break
-                
-                # Re-check this servo's limit status
-                try:
-                    time.sleep(0.1)
-                    new_feedback = self.get_feedback()
-                    new_limits = new_feedback.get("limits", [])
-                    
-                    if (i < len(new_limits) and len(new_limits[i]) >= 2 and 
-                        not any(new_limits[i])):  # Limit cleared
-                        logger.info(f"Limit cleared on servo {i+1} after {attempts+1} attempts")
-                        break
-                        
-                except Exception as e:
-                    logger.error(f"Error checking limit status for servo {i+1}: {e}")
-                    success = False
-                    break
-                
-                attempts += 1
-            else:
-                logger.warning(f"Failed to clear limit on servo {i+1} after {max_attempts} attempts")
-                success = False
-        
-        # Final verification
-        if success:
-            time.sleep(0.2)  # Allow time for final status update
-            final_feedback = self.get_feedback()
-            final_limits = final_feedback.get("limits", [])
-            
-            # Check if any limits are still hit
-            still_hit = any(
-                not any(lim) for lim in final_limits 
-                if len(lim) >= 2
-            )
-            
-            if not still_hit:
-                self.limit_hit = False
-                logger.info("All limits successfully cleared")
-                return True
-            else:
-                logger.warning("Some limits still active after clearing attempt")
-                return False
-        
-        return False
 
     def __del__(self):
         """Cleanup on destruction."""

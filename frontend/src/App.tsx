@@ -4,6 +4,7 @@ import { ThemeProvider } from './components/ThemeProvider';
 import Navigation from './components/Navigation';
 import RobotControl from './pages/RobotControl';
 import MotorStatus from './pages/MotorStatus';
+import ArmDashboard from './pages/ArmDashboard';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('control');
@@ -12,6 +13,8 @@ function App() {
     switch (currentPage) {
       case 'status':
         return <MotorStatus />;
+      case 'dashboard':
+        return <ArmDashboard />;
       case 'control':
       default:
         return <RobotControl />;

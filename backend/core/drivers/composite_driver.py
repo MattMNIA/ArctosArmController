@@ -1,6 +1,13 @@
 class CompositeDriver:
     def __init__(self, drivers):
-        self.drivers = drivers
+        driver_order = ['CanDriver', 'PyBulletDriver', 'SimDriver']
+   
+        self.drivers = []
+        for name in driver_order:
+            for d in drivers:
+                if d.__class__.__name__ == name:
+                            self.drivers.append(d)
+                            break
 
     def connect(self):
         for d in self.drivers: d.connect()

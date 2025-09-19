@@ -11,19 +11,32 @@ from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
 import utils.logger  # Import to trigger logging setup
 
+import argparse
+
 socketio = SocketIO(cors_allowed_origins="*")
 
-def create_app():
+def create_app(drivers_list):
     app = Flask(__name__)
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
     # Initialize Drivers
-    sim_driver = SimDriver()
-    # pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
-    can_driver = CanDriver()
-    # comp_driver = composite_driver.CompositeDriver([pybullet_driver, can_driver])
+    drivers = []
+    if 'sim' in drivers_list:
+        sim_driver = SimDriver()
+        drivers.append(sim_driver)
+    if 'pybullet' in drivers_list:
+        pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
+        drivers.append(pybullet_driver)
+    if 'can' in drivers_list:
+        can_driver = CanDriver()
+        drivers.append(can_driver)
+    if not drivers:
+        # Default to sim if none
+        sim_driver = SimDriver()
+        drivers.append(sim_driver)
+    comp_driver = CompositeDriver(drivers)
     # Initialize MotionService
-    motion_service = MotionService(driver=sim_driver, loop_hz=50)
+    motion_service = MotionService(driver=comp_driver, loop_hz=50)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
     app.config['motion_service'] = motion_service
     motion_service.start()
@@ -42,5 +55,8 @@ def create_app():
     return app
 
 if __name__ == "__main__":
-    app = create_app()
+    parser = argparse.ArgumentParser(description="Run the Arctos Arm Controller")
+    parser.add_argument('--drivers', nargs='+', choices=['sim', 'pybullet', 'can'], default=['sim', 'pybullet', 'can'], help="Specify which drivers to use")
+    args = parser.parse_args()
+    app = create_app(args.drivers)
     socketio.run(app, host="0.0.0.0", port=5000, debug=False)

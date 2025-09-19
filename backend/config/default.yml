@@ -3,4 +3,4 @@ can_driver:
   encoder_resolution: 16384
   can_interface: "COM4"  # or "can0" on Linux
   bitrate: 500000
-  auto_clear_limits: true
+  auto_clear_limits: false

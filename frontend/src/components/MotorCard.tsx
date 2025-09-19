@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Settings } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 interface MotorCardProps {
   motorIndex: number;
@@ -7,6 +7,7 @@ interface MotorCardProps {
   isEnabled: boolean;
   topLimitHit: boolean;
   bottomLimitHit: boolean;
+  encoderError?: number; // encoder error in units
 }
 
 export default function MotorCard({
@@ -14,7 +15,8 @@ export default function MotorCard({
   position,
   isEnabled,
   topLimitHit,
-  bottomLimitHit
+  bottomLimitHit,
+  encoderError = 0
 }: MotorCardProps) {
   const positionDegrees = (position * 180 / Math.PI).toFixed(1);
 
@@ -70,19 +72,41 @@ export default function MotorCard({
 
       {/* Position Section */}
       <div className="bg-gray-900/50 rounded-2xl p-4 mb-6 border border-gray-700/50">
+        <div>
+          <p className="text-sm font-semibold text-gray-400 mb-1">Current Position</p>
+          <div className="text-3xl font-black text-white tracking-tight">
+            {positionDegrees}°
+          </div>
+        </div>
+      </div>
+
+      {/* Encoder Error Section */}
+      <div className="bg-gray-900/50 rounded-2xl p-4 mb-6 border border-gray-700/50">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-gray-400 mb-1">Current Position</p>
-            <div className="text-3xl font-black text-white tracking-tight">
-              {positionDegrees}°
+            <p className="text-sm font-semibold text-gray-400 mb-1">Encoder Error</p>
+            <div className={`text-2xl font-bold tracking-tight ${
+              Math.abs(encoderError) >= 1000 
+                ? 'text-red-400' 
+                : Math.abs(encoderError) >= 100 
+                  ? 'text-yellow-400' 
+                  : 'text-green-400'
+            }`}>
+              {encoderError > 0 ? '+' : ''}{encoderError} units
             </div>
           </div>
           <motion.div 
-            whileHover={{ rotate: 180 }}
-            transition={{ duration: 0.5 }}
-            className="w-12 h-12 bg-blue-900/30 rounded-xl flex items-center justify-center"
+            animate={Math.abs(encoderError) >= 100 ? { scale: [1, 1.2, 1] } : {}}
+            transition={{ duration: 2, repeat: Math.abs(encoderError) >= 100 ? Infinity : 0 }}
+            className="w-12 h-12 bg-gray-900/30 rounded-xl flex items-center justify-center"
           >
-            <Settings className="w-6 h-6 text-blue-400" />
+            <AlertTriangle className={`w-6 h-6 ${
+              Math.abs(encoderError) >= 1000 
+                ? 'text-red-400' 
+                : Math.abs(encoderError) >= 100 
+                  ? 'text-yellow-400' 
+                  : 'text-green-400'
+            }`} />
           </motion.div>
         </div>
       </div>

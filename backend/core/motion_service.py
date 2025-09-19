@@ -248,24 +248,12 @@ class MotionService:
             if should_pause:
                 self.paused = True
                 self.current_state = "LIMIT_HIT"
-            
-            if isinstance(self.driver, SimDriver):
-                mode = "SIM"
-            elif self.driver.__class__.__name__ == "CanDriver":
-                mode = "CAN"
-            elif self.driver.__class__.__name__ == "PyBulletDriver":
-                mode = "TWIN"
-            elif self.driver.__class__.__name__ == "CompositeDriver":
-                mode = "COMPOSITE"
-            else:
-                mode = "?"
 
             event = {
                 "state": self.current_state,
                 "q": feedback.get("q", []),
                 "error": feedback.get("error", []),
-                "limits": feedback.get("limits", []),
-                "mode": mode
+                "limits": feedback.get("limits", [])
             }
             
             if self.ws_emit:
