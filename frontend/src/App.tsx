@@ -5,6 +5,7 @@ import Navigation from './components/Navigation';
 import RobotControl from './pages/RobotControl';
 import MotorStatus from './pages/MotorStatus';
 import ArmDashboard from './pages/ArmDashboard';
+import SimulationVideo from './pages/SimulationVideo';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('control');
@@ -15,6 +16,8 @@ function App() {
         return <MotorStatus />;
       case 'dashboard':
         return <ArmDashboard />;
+      case 'simulation':
+        return <SimulationVideo />;
       case 'control':
       default:
         return <RobotControl />;

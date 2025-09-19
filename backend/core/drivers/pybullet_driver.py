@@ -3,6 +3,7 @@ import pybullet_data
 import time
 from typing import List, Dict, Any, Optional
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,21 @@ class PyBulletDriver:
             "limits": [[False, False] for _ in self.joint_indices],
         }
 
+    def get_camera_frame(self, width: int = 640, height: int = 480) -> np.ndarray:
+        """Capture a camera frame from the PyBullet simulation."""
+        view_matrix = p.computeViewMatrix(
+            cameraEyePosition=[1, 1, 1],
+            cameraTargetPosition=[0, 0, 0],
+            cameraUpVector=[0, 0, 1]
+        )
+        proj_matrix = p.computeProjectionMatrixFOV(
+            fov=60, aspect=float(width)/height,
+            nearVal=0.1, farVal=100.0
+        )
+        img = p.getCameraImage(width, height, view_matrix, proj_matrix)
+        rgb = np.reshape(img[2], (height, width, 4))[:, :, :3]  # take RGB
+        return rgb
+
     def estop(self):
         """Stop motion immediately by zeroing motor torques."""
         for j in self.joint_indices:
@@ -231,5 +247,5 @@ class PyBulletDriver:
     def handle_limits(self, feedback: Dict[str, Any]) -> bool:
         """PyBulletDriver has no limits, so always return False."""
         return False
-        
+
 

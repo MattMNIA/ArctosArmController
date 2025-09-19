@@ -6,6 +6,7 @@ from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
 from api.teleop_routes import teleop_bp
 from api.status_routes import status_bp
+from api.sim_routes import sim_bp
 from core.drivers import composite_driver
 from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
@@ -46,6 +47,7 @@ def create_app(drivers_list):
     app.register_blueprint(exec_bp, url_prefix='/api/execute')
     app.register_blueprint(teleop_bp, url_prefix='/api/teleop')
     app.register_blueprint(status_bp, url_prefix='/api/status')
+    app.register_blueprint(sim_bp, url_prefix='/api/sim')
 
     # Example WebSocket channel
     @socketio.on("connect")

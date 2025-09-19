@@ -4,3 +4,4 @@ PyYAML
 pybullet
 flask-cors
 requests
+opencv-python

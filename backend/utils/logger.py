@@ -29,6 +29,7 @@ component_levels = {
     'core.motion_service': logging.DEBUG, 
     'core.drivers.mks_servo_can.mks_servo': logging.INFO,
     'backend.core.drivers.mks_servo_can.mks_servo': logging.INFO,
+    'api.sim_routes': logging.DEBUG,
 }
 setup_logging(component_levels=component_levels)
 
