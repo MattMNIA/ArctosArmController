@@ -24,7 +24,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
       animate={{ y: 0 }}
       className="fixed top-0 left-0 right-0 z-50 backdrop-blur-lg bg-gray-800/80 border-b border-gray-700/50"
     >
-      <div className="max-w-6xl mx-auto px-6">
+      <div className="w-full pl-8 pr-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <motion.div
