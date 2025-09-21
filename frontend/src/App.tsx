@@ -6,6 +6,7 @@ import RobotControl from './pages/RobotControl';
 import MotorStatus from './pages/MotorStatus';
 import ArmDashboard from './pages/ArmDashboard';
 import SimulationVideo from './pages/SimulationVideo';
+import MotorHoming from './pages/MotorHoming';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('control');
@@ -18,6 +19,8 @@ function App() {
         return <ArmDashboard />;
       case 'simulation':
         return <SimulationVideo />;
+      case 'homing':
+        return <MotorHoming />;
       case 'control':
       default:
         return <RobotControl />;

@@ -97,3 +97,42 @@ def grasp_object():
     motion_service.grasp_object(force)
     return jsonify({"status": "grasping object", "force": force})
 
+@exec_bp.route('/home_joints', methods=['POST'])
+def home_joints():
+    try:
+        payload = request.get_json(silent=True)
+    except Exception as e:
+        logger.error(f"Error parsing JSON for home_joints: {e}")
+        return jsonify({"error": "Invalid JSON payload"}), 400
+    
+    if not payload or 'joint_indices' not in payload:
+        return jsonify({"error": "Missing 'joint_indices' in payload"}), 400
+    
+    joint_indices = payload['joint_indices']
+    if not isinstance(joint_indices, list):
+        return jsonify({"error": "'joint_indices' must be a list"}), 400
+    
+    # Validate that all indices are integers
+    if not all(isinstance(idx, int) for idx in joint_indices):
+        return jsonify({"error": "All joint indices must be integers"}), 400
+    
+    motion_service = current_app.config['motion_service']
+    if not motion_service.running:
+        logger.error("MotionService is not running")
+        return jsonify({"error": "MotionService not running"}), 500
+    
+    motion_service.home_joints(joint_indices)
+    logger.info("Home joints command enqueued: %s", joint_indices)
+    return jsonify({"status": "homing joints", "joint_indices": joint_indices})
+
+@exec_bp.route('/estop', methods=['POST'])
+def estop():
+    """Emergency stop all motors."""
+    motion_service = current_app.config['motion_service']
+    if not motion_service.running:
+        logger.warning("MotionService is not running, but performing emergency stop anyway")
+    
+    motion_service.estop()
+    logger.warning("Emergency stop executed via API")
+    return jsonify({"status": "emergency stop executed"})
+

@@ -15,6 +15,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'status', label: 'Motor Status' },
     { id: 'dashboard', label: 'Arm Dashboard' },
     { id: 'simulation', label: 'Simulation Video' },
+    { id: 'homing', label: 'Motor Homing' },
   ];
 
   const isActive = (itemId: string) => currentPage === itemId;

@@ -8,6 +8,7 @@ class SimDriver:
     def enable(self): print("SimDriver enabled")
     def disable(self): print("SimDriver disabled")
     def home(self): print("SimDriver homing")
+    def home_joints(self, joint_indices: List[int]): print(f"SimDriver homing joints: {joint_indices}")
     def send_joint_targets(self, q: List[float], t_s: float):
         print(f"SimDriver moving to {q} over {t_s:.2f}s")
     def get_feedback(self) -> Dict[str, Any]:

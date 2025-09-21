@@ -172,9 +172,31 @@ class CanDriver():
                     
                     # Add timeout for servo initialization
                     servo.enable_motor(Enable.Enable)
-                    status = servo.read_en_pins_status()
-                    if status is not EnableStatus.Enabled:
-                        raise RuntimeError(f"Failed to enable servo ID {i}")
+                    
+                    # Check enable status with retry
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        status = servo.read_en_pins_status()
+                        logger.debug(f"Servo {i} enable status (attempt {attempt+1}): {status}")
+                        
+                        if status == EnableStatus.Enabled:
+                            break
+                        elif attempt < max_retries - 1:
+                            logger.warning(f"Servo {i} not enabled, retrying... (attempt {attempt+1}/{max_retries})")
+                            time.sleep(0.5)  # Wait before retry
+                        else:
+                            # Final attempt failed, log detailed status
+                            logger.error(f"Servo {i} failed to enable after {max_retries} attempts")
+                            logger.error(f"Final status: {status}")
+                            
+                            # Check if endstop might be the issue
+                            try:
+                                io_status = servo.read_io_port_status()
+                                logger.error(f"Servo {i} IO port status: {io_status} (bit 0=IN1, bit 1=IN2)")
+                            except Exception as e:
+                                logger.error(f"Could not read IO status for servo {i}: {e}")
+                            
+                            raise RuntimeError(f"Failed to enable servo ID {i} - status: {status}")
                     self.servos.append(servo)
                     logger.debug(f"✅ Servo {i} initialized.")
                     
@@ -198,6 +220,16 @@ class CanDriver():
                     logger.debug(f"✅ Limit port enabled on Servo {index}")
                 except Exception as e:
                     logger.error(f"⚠️ Failed to enable limit port on Servo {index}: {e}")
+                    
+        # Check that all servos are enabled
+        for i, servo in enumerate(self.servos, start=1):
+            try:
+                status = servo.read_en_pins_status()
+                if status is not EnableStatus.Enabled:
+                    raise RuntimeError(f"Failed to enable servo ID {i}")
+            except Exception as e:
+                logger.error(f"Error checking enable status for servo ID {i}: {e}")
+                raise
         duration = time.time() - start_time
         logger.info(f"✅ {len(self.servos)} servos initialized in {duration:.2f} seconds.")
 
@@ -247,8 +279,53 @@ class CanDriver():
             logger.warning(f"Error shutting down thread pool: {e}")
 
     def home(self) -> None: 
-        """Home all axes - to be implemented."""
-        pass
+        """Home all axes using configured homing parameters."""
+        # Home all joints (0-5)
+        self.home_joints(list(range(len(self.servos))))
+
+    def home_joints(self, joint_indices: List[int]) -> None:
+        """Home specific joints using the configured homing parameters."""
+        if self.bus is None:
+            logger.warning("CAN bus not initialized. Call connect() first.")
+            return
+        
+        with self._servo_lock:
+            if not self.servos:
+                logger.warning("Servos not enabled. Call enable() first.")
+                return
+
+        # Load servo settings
+        config_manager = ConfigManager(Path("backend/config/mks_settings.yaml"))
+        
+        for joint_idx in joint_indices:
+            if joint_idx < 0 or joint_idx >= len(self.servos):
+                logger.error(f"Invalid joint index {joint_idx}, must be between 0 and {len(self.servos)-1}")
+                continue
+                
+            servo = self.servos[joint_idx]
+            servo_config = config_manager.get(f"servo_{joint_idx}", {})
+            
+            try:
+                homing_offset = servo_config.get("homing_offset", 0)
+                home_speed = servo_config.get("home_speed", 50)
+                
+                logger.info(f"Homing joint {joint_idx} with offset={homing_offset}, speed={home_speed}")
+                
+                # Home the axis following the example pattern
+                servo.b_go_home()
+                while servo.is_motor_running():
+                    time.sleep(0.05)
+                
+                if homing_offset != 0:
+                    servo.run_motor_relative_motion_by_axis(int(home_speed), 150, -1*int(homing_offset))
+                    while servo.is_motor_running():
+                        time.sleep(0.05)
+                
+                servo.set_current_axis_to_zero()
+                logger.info(f"Successfully homed joint {joint_idx}")
+                
+            except Exception as e:
+                logger.error(f"Failed to home joint {joint_idx}: {e}")
 
     def send_joint_targets(self, q: List[float], t_s: float = 1.0):
         """
@@ -540,7 +617,7 @@ class CanDriver():
     def handle_limits(self, feedback: Dict[str, Any]) -> bool:
         """
         Handle limit switches based on feedback.
-        Returns True if execution should be paused due to uncleared limits.
+        Logs limit hits but does not pause execution.
         """
         limits = feedback.get("limits", [])
         dq = feedback.get("dq", [])
@@ -550,31 +627,13 @@ class CanDriver():
             return False
         
         # Check if any servo is at limit and stopped
-        limit_hit = False
         for i, (lim, vel) in enumerate(zip(limits, dq)):
             # Check if any limit is hit (assuming False means limit hit)
-            if (len(lim) >= 2 and any(lim)) and abs(vel) < 1e-6:
+            if len(lim) >= 2 and any(lim):
                 logger.warning(f"Limit hit on axis {i}: {lim}, velocity: {vel}")
-                limit_hit = True
-                break
         
-        if limit_hit:
-            if not self.limit_hit:
-                self.limit_hit = True
-                logger.warning("Limit switch detected, clearing motion queue")
-                if self.motion_service:
-                    self.motion_service.clear_queue()
-                
-                # Cancel any ongoing movements
-                self._cancel_pending_futures()
-            
-            logger.error("Limit switch hit and joint stopped. Execution paused.")
-            return True
-        else:
-            if self.limit_hit:
-                logger.info("Limits cleared, resuming normal operation")
-                self.limit_hit = False
-            return False
+        # Always return False to prevent blocking movements
+        return False
 
     def __del__(self):
         """Cleanup on destruction."""

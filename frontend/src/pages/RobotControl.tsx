@@ -156,6 +156,25 @@ export default function RobotControl() {
     }
   };
 
+  const emergencyStop = async () => {
+    try {
+      const confirmed = window.confirm("Are you sure you want to EMERGENCY STOP all motors? This will immediately halt all movement.");
+      if (!confirmed) return;
+
+      const res = await fetch("http://localhost:5000/api/execute/estop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        alert("Failed to execute emergency stop");
+      } else {
+        alert("Emergency stop executed successfully");
+      }
+    } catch (error) {
+      alert("Error executing emergency stop");
+    }
+  };
+
   return (
     <section className="py-8 min-h-screen">
       <div className="max-w-6xl mx-auto px-6">
@@ -195,6 +214,27 @@ export default function RobotControl() {
                 </span>
               </>
             )}
+          </motion.div>
+
+          {/* Emergency Stop Button */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.4 }}
+            className="mb-8"
+          >
+            <motion.button
+              onClick={emergencyStop}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="flex items-center justify-center space-x-3 px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold text-lg shadow-lg hover:shadow-xl transition-all duration-200 border-2 border-red-500"
+            >
+              <AlertCircle className="w-6 h-6" />
+              <span>EMERGENCY STOP</span>
+            </motion.button>
+            <p className="text-xs text-red-400 mt-2 text-center">
+              Immediately stops all motors - use only in emergency
+            </p>
           </motion.div>
 
           <p className="text-lg text-gray-300 max-w-2xl mx-auto">

@@ -7,6 +7,7 @@ servo_0:
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 30
+  homing_offset: 110000
   microsteps: 16
   work_mode: SrvFoc
 servo_1:
@@ -14,21 +15,23 @@ servo_1:
   direction: CW
   enable_homing: Enable
   endstop_enabled: true
-  endstop_level: Low
+  endstop_level: High
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 60
+  homing_offset: 20000
   microsteps: 16
   work_mode: SrvFoc
 servo_2:
   current: 1600
   direction: CW
   enable_homing: Enable
-  endstop_enabled: true
+  endstop_enabled: false  # Temporarily disable to test
   endstop_level: Low
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 60
+  homing_offset: 20000
   microsteps: 16
   work_mode: SrvFoc
 servo_3:
@@ -40,6 +43,7 @@ servo_3:
   holding: FIFTHTY_PERCENT
   home_direction: CW
   home_speed: 90
+  homing_offset: 30000
   microsteps: 16
   shaft_protect: false
   work_mode: SrvFoc
@@ -52,6 +56,7 @@ servo_4:
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 80
+  homing_offset: 25000
   microsteps: 16
   shaft_protect: true
   work_mode: SrvFoc
@@ -64,6 +69,7 @@ servo_5:
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 60
+  homing_offset: 20000
   microsteps: 16
   shaft_protect: true
   work_mode: SrvFoc

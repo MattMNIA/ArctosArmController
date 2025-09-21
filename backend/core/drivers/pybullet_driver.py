@@ -83,6 +83,19 @@ class PyBulletDriver:
             )
         self.step_simulation(1.0)
 
+    def home_joints(self, joint_indices: List[int]) -> None:
+        """Home specific joints to their zero positions."""
+        for joint_idx in joint_indices:
+            if joint_idx < len(self.joint_indices):
+                actual_joint_idx = self.joint_indices[joint_idx]
+                p.setJointMotorControl2(
+                    self.robot_id,
+                    actual_joint_idx,
+                    controlMode=p.POSITION_CONTROL,
+                    targetPosition=0.0
+                )
+        self.step_simulation(1.0)
+
     def send_joint_targets(self, q: List[float], t_s: float):
         """
         Command the robot to move towards target joint positions.

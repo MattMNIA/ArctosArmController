@@ -21,6 +21,9 @@ class CompositeDriver:
     def home(self):
         for d in self.drivers: d.home()
 
+    def home_joints(self, joint_indices):
+        for d in self.drivers: d.home_joints(joint_indices)
+
     def send_joint_targets(self, q, t_s):
         for d in self.drivers: d.send_joint_targets(q, t_s)
 

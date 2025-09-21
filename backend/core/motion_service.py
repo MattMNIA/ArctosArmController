@@ -53,6 +53,18 @@ class GripperCommand(Command):
             return f"Gripper set: position={self.position}, force={self.force}"
         return f"Gripper {self.action}: force={self.force}"
 
+class HomeCommand(Command):
+    """Command for homing specific joints."""
+    def __init__(self, joint_indices: List[int]):
+        self.joint_indices = joint_indices
+
+    def execute(self, driver) -> None:
+        """Home the specified joints."""
+        driver.home_joints(self.joint_indices)
+
+    def get_description(self) -> str:
+        return f"Home joints: {self.joint_indices}"
+
 class MotionService:
     """
     Manages motion commands via a queue and executes them in a separate thread.
@@ -216,12 +228,12 @@ class MotionService:
             # Execute command outside of locks to prevent deadlocks
             cmd.execute(self.driver)
             
-            if isinstance(cmd, GripperCommand):
-                # Gripper commands are instant, mark as done
+            if isinstance(cmd, (GripperCommand, HomeCommand)):
+                # Gripper and home commands are instant, mark as done
                 with self._command_lock:
                     self._current_command = None
                 self.current_state = "IDLE"
-                logger.info("Gripper command execution complete")
+                logger.info("Command execution complete")
                 
         except Exception as e:
             logger.error(f"Error executing command {cmd.get_description()}: {e}")
@@ -285,3 +297,17 @@ class MotionService:
         """Enqueue a joint movement command."""
         cmd = JointCommand(q, duration_s)
         self.enqueue(cmd)
+
+    def home_joints(self, joint_indices: List[int]):
+        """Enqueue a command to home specific joints."""
+        cmd = HomeCommand(joint_indices)
+        self.enqueue(cmd)
+
+    def estop(self):
+        """Emergency stop all motors immediately."""
+        logger.warning("🚨 EMERGENCY STOP ACTIVATED")
+        self.clear_queue()
+        if hasattr(self.driver, 'estop'):
+            self.driver.estop()
+        self.current_state = "EMERGENCY_STOP"
+        logger.warning("Emergency stop completed")
