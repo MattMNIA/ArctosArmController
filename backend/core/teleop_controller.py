@@ -36,7 +36,7 @@ class TeleopController:
             if isinstance(joint, int) and joint < 6:  # joint indices 0-5
                 if event == 'press':
                     # Convert scale to speed (RPM), adjust factor as needed
-                    speed = scale * 50.0  # scale from keyboard is like 10, make speed 500 RPM max
+                    speed = scale * 10.0  # scale from keyboard is like 10, make speed 500 RPM max
                     self.driver.start_joint_velocity(joint, speed)
                     self.active_movements[joint] = speed
                 elif event == 'release':

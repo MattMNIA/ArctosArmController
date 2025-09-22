@@ -29,12 +29,12 @@ class CanDriver():
         self.encoder_resolution = self.config_manager.get('can_driver.encoder_resolution', 16384)
         self.can_interface = self.config_manager.get('can_driver.can_interface', 'COM4')
         self.bitrate = self.config_manager.get('can_driver.bitrate', 500000)
-        self.default_speed = self.config_manager.get('can_driver.default_speed', 500)
-        self.default_acc = self.config_manager.get('can_driver.default_acc', 150)
+        self.default_speed = self.config_manager.get('can_driver.default_speed', 200)
+        self.default_acc = self.config_manager.get('can_driver.default_acc', 50)
         
         # Communication timeout settings
         self.can_timeout = self.config_manager.get('can_driver.can_timeout', 2.0)
-        self.servo_timeout = self.config_manager.get('can_driver.servo_timeout', 1.0)
+        self.servo_timeout = self.config_manager.get('can_driver.servo_timeout', 0.1)
         
         self.bus = None
         self.servos = []
@@ -52,6 +52,7 @@ class CanDriver():
         # Add locks for thread safety
         self._servo_lock = threading.RLock()  # Reentrant lock for servo operations
         self._futures_lock = threading.Lock()  # For managing futures list
+        self.velocity_active = [False] * 6  # Track which joints have active velocity control
 
     def is_can_interface_up(self) -> bool:
         """
@@ -179,7 +180,16 @@ class CanDriver():
                         status = servo.read_en_pins_status()
                         logger.debug(f"Servo {i} enable status (attempt {attempt+1}): {status}")
                         
-                        if status == EnableStatus.Enabled:
+                        # Check if endstop is triggered
+                        try:
+                            io_status = servo.read_io_port_status()
+                            endstop_triggered = io_status is not None and (io_status & 1 or io_status & 2)
+                        except Exception as e:
+                            logger.debug(f"Could not read IO status for servo {i}: {e}")
+                            endstop_triggered = False
+                        
+                        if status == EnableStatus.Enabled or endstop_triggered:
+                            logger.debug(f"Servo {i} considered enabled (status: {status}, endstop_triggered: {endstop_triggered})")
                             break
                         elif attempt < max_retries - 1:
                             logger.warning(f"Servo {i} not enabled, retrying... (attempt {attempt+1}/{max_retries})")
@@ -187,7 +197,7 @@ class CanDriver():
                         else:
                             # Final attempt failed, log detailed status
                             logger.error(f"Servo {i} failed to enable after {max_retries} attempts")
-                            logger.error(f"Final status: {status}")
+                            logger.error(f"Final status: {status}, endstop_triggered: {endstop_triggered}")
                             
                             # Check if endstop might be the issue
                             try:
@@ -225,8 +235,16 @@ class CanDriver():
         for i, servo in enumerate(self.servos, start=1):
             try:
                 status = servo.read_en_pins_status()
-                if status is not EnableStatus.Enabled:
-                    raise RuntimeError(f"Failed to enable servo ID {i}")
+                # Check if endstop is triggered
+                try:
+                    io_status = servo.read_io_port_status()
+                    endstop_triggered = io_status is not None and (io_status & 1 or io_status & 2)
+                except Exception as e:
+                    logger.debug(f"Could not read IO status for servo {i}: {e}")
+                    endstop_triggered = False
+                
+                if status is not EnableStatus.Enabled and not endstop_triggered:
+                    raise RuntimeError(f"Failed to enable servo ID {i} - status: {status}, endstop_triggered: {endstop_triggered}")
             except Exception as e:
                 logger.error(f"Error checking enable status for servo ID {i}: {e}")
                 raise
@@ -613,6 +631,8 @@ class CanDriver():
                     logger.debug(f"Emergency stop sent to servo {i+1}: {result}")
                 except Exception as e:
                     logger.error(f"Failed to send emergency stop to servo {i+1}: {e}")
+        
+        self.velocity_active = [False] * 6
 
     def start_joint_velocity(self, joint_index: int, speed: float) -> None:
         """
@@ -622,19 +642,28 @@ class CanDriver():
             joint_index: Index of the joint (0-5)
             speed: Speed in RPM, positive for CW, negative for CCW
         """
+        if joint_index < 0 or joint_index >= len(self.velocity_active):
+            logger.error(f"Invalid joint index {joint_index}")
+            return
+        
+        if self.velocity_active[joint_index]:
+            # Already active, no need to send again
+            return
+        
         if self.bus is None:
             logger.warning("CAN bus not initialized.")
             return
         
         with self._servo_lock:
-            if joint_index < 0 or joint_index >= len(self.servos):
-                logger.error(f"Invalid joint index {joint_index}")
+            if joint_index >= len(self.servos):
+                logger.error(f"Servo index {joint_index} out of range")
                 return
             
             try:
                 direction = Direction.CW if speed >= 0 else Direction.CCW
                 abs_speed = abs(int(speed))
-                self.servos[joint_index].run_motor_speed_mode(abs_speed, direction)
+                self.servos[joint_index].run_motor_in_speed_mode(direction, abs_speed, self.default_acc)
+                self.velocity_active[joint_index] = True
                 logger.debug(f"Started velocity control for joint {joint_index}: speed={speed} RPM")
             except Exception as e:
                 logger.error(f"Failed to start velocity control for joint {joint_index}: {e}")
@@ -656,7 +685,9 @@ class CanDriver():
                 return
             
             try:
-                self.servos[joint_index].stop_motor_in_speed_mode()
+                # Use maximum acceleration for faster stopping
+                self.servos[joint_index].stop_motor_in_speed_mode(255)
+                self.velocity_active[joint_index] = False
                 logger.debug(f"Stopped velocity control for joint {joint_index}")
             except Exception as e:
                 logger.error(f"Failed to stop velocity control for joint {joint_index}: {e}")

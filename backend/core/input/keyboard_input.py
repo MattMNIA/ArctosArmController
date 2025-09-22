@@ -10,6 +10,7 @@ class KeyboardController(InputController):
     def __init__(self):
         pygame.init()
         pygame.display.set_mode((400, 300))  # Create a window for keyboard input capture
+        pygame.key.set_repeat(0)  # Disable key repeat to prevent buffering
         self.all_scale = 10
         self.keymap = {
 
@@ -41,8 +42,6 @@ class KeyboardController(InputController):
         """Return a dict of {joint: delta} or {'gripper': delta} for all currently pressed keys"""
         pygame.event.pump()
         current_pressed = set(k for k in self.keymap if pygame.key.get_pressed()[k])
-        if current_pressed:
-            logger.info(f"Current pressed keys: {current_pressed}")
         commands = {}
 
         for key in current_pressed:
@@ -56,30 +55,45 @@ class KeyboardController(InputController):
             elif joint == "gripper":  # gripper open/close
                 commands["gripper"] = commands.get("gripper", 0.0) + scale * self.all_scale
 
-        self.last_pressed = current_pressed
         return commands
 
     def get_events(self):
-        """Return a list of events: ('press' or 'release', joint, scale)"""
-        pygame.event.pump()
+        """Return a list of events: ('press' or 'release', joint, scale) based on key state transitions"""
+        pygame.event.pump()  # Process events to keep pygame responsive
+        pygame.event.clear()  # Clear any accumulated events to prevent buffering
+        current_pressed = set(k for k in self.keymap if pygame.key.get_pressed()[k])
+        
         events = []
-        for event in pygame.event.get():
-            if event.type == pygame.KEYDOWN and event.key in self.keymap:
-                joint, scale = self.keymap[event.key]
-                scaled_scale = scale * self.all_scale
-                if isinstance(joint, list):
-                    joint_list = cast(List[int], joint)
-                    for j in joint_list:
-                        events.append(('press', j, scaled_scale))
-                else:
-                    events.append(('press', joint, scaled_scale))
-            elif event.type == pygame.KEYUP and event.key in self.keymap:
-                joint, scale = self.keymap[event.key]
-                scaled_scale = scale * self.all_scale
-                if isinstance(joint, list):
-                    joint_list = cast(List[int], joint)
-                    for j in joint_list:
-                        events.append(('release', j, scaled_scale))
-                else:
-                    events.append(('release', joint, scaled_scale))
+        
+        # Prioritize release events for faster response
+        releases = []
+        presses = []
+        
+        # Keys that were pressed last time but not now = release
+        for key in self.last_pressed - current_pressed:
+            joint, scale = self.keymap[key]
+            scaled_scale = scale * self.all_scale
+            if isinstance(joint, list):
+                joint_list = cast(List[int], joint)
+                for j in joint_list:
+                    releases.append(('release', j, scaled_scale))
+            else:
+                releases.append(('release', joint, scaled_scale))
+        
+        # Keys that are pressed now but weren't last time = press
+        for key in current_pressed - self.last_pressed:
+            joint, scale = self.keymap[key]
+            scaled_scale = scale * self.all_scale
+            if isinstance(joint, list):
+                joint_list = cast(List[int], joint)
+                for j in joint_list:
+                    presses.append(('press', j, scaled_scale))
+            else:
+                presses.append(('press', joint, scaled_scale))
+        
+        # Process releases first for higher priority
+        events.extend(releases)
+        events.extend(presses)
+        
+        self.last_pressed = current_pressed
         return events

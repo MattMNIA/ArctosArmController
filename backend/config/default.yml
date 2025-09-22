@@ -3,4 +3,5 @@ can_driver:
   encoder_resolution: 16384
   can_interface: "COM4"  # or "can0" on Linux
   bitrate: 500000
-  auto_clear_limits: false
+  default_speed: 200  # Reduced from 500 to 200 RPM
+  default_acc: 50    # Reduced from 150 to 50 RPM/s  

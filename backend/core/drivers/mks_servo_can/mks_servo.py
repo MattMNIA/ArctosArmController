@@ -144,7 +144,7 @@ class MksServo:
         timeout (int): Timeout for waiting for a response in seconds.
     """
     GENERIC_RESPONSE_LENGTH = 3
-    DEFAULT_TIMEOUT = 1
+    DEFAULT_TIMEOUT = 0.1
     MAX_CALIBRATION_TIME = 30
     MAX_HOMING_TIME = 20
 
