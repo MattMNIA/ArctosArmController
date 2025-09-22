@@ -22,8 +22,8 @@ class XboxController(InputController):
         self.axis_map = {
             0: (0, 0.5),   # left stick X → joint 0
             1: (1, -0.5),  # left stick Y → joint 1
-            2: (2, 0.5),   # right stick X → joint 2
-            3: (3, -0.5),  # right stick Y → joint 3
+            3: (2, 0.5),   # right stick X → joint 3
+            2: (3, -0.5),  # right stick Y → joint 2
         }
 
         self.trigger_map = {
