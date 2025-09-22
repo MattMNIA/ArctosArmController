@@ -83,6 +83,7 @@ class MotionService:
         
         self._current_state = "IDLE"
         self.ws_emit: Optional[Callable[[str, Dict[str, Any]], None]] = None
+        self.has_active_connections: Optional[Callable[[], bool]] = None
         self._paused = False  # Flag to freeze execution on limit hit
         self._current_command: Optional[Command] = None
         self._command_start_time = 0.0
@@ -268,7 +269,7 @@ class MotionService:
                 "limits": feedback.get("limits", [])
             }
             
-            if self.ws_emit:
+            if self.ws_emit and (self.has_active_connections is None or self.has_active_connections()):
                 self.ws_emit("telemetry", event)
         except Exception as e:
             logger.error(f"Error emitting status: {e}")

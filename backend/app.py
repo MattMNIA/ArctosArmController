@@ -7,6 +7,7 @@ from api.exec_routes import exec_bp
 from api.teleop_routes import teleop_bp
 from api.status_routes import status_bp
 from api.sim_routes import sim_bp
+from api.ws_routes import init_websocket_events, has_active_connections
 from core.drivers import composite_driver
 from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
@@ -54,6 +55,7 @@ def create_app(drivers_list):
     # Initialize MotionService
     motion_service = MotionService(driver=comp_driver, loop_hz=50)
     motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
+    motion_service.has_active_connections = has_active_connections
     app.config['motion_service'] = motion_service
     motion_service.start()
 
@@ -64,10 +66,8 @@ def create_app(drivers_list):
     app.register_blueprint(status_bp, url_prefix='/api/status')
     app.register_blueprint(sim_bp, url_prefix='/api/sim')
 
-    # Example WebSocket channel
-    @socketio.on("connect")
-    def ws_connect():
-        emit("status", {"msg": "Connected to robotic arm backend"})
+    # Initialize WebSocket event handlers
+    init_websocket_events(socketio)
 
     return app
 
@@ -105,4 +105,4 @@ if __name__ == "__main__":
             app.config['motion_service'].stop()
     else:
         # Run Flask server normally
-        socketio.run(app, host="0.0.0.0", port=5000, debug=False)
+        socketio.run(app, host="0.0.0.0", port=5000, debug=True)
