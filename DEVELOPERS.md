@@ -16,7 +16,7 @@ backend/
 │   ├── drivers/
 │   │   ├── base.py        # Driver ABC (interface contract)
 │   │   ├── sim\_driver.py  # Simulation driver (prints + dummy telemetry)
-│   │   └── can\_driver.py  # (future) Real CAN bus driver
+│   │   └── can\_driver.py  # Real CAN bus driver
 │   └── ik/
 │       └── base.py        # IK Solver ABC
 │

@@ -363,7 +363,7 @@ class MksServo:
         # Wait for response (with a timeout)
         start_time = time.perf_counter()
         while (time.perf_counter() - start_time < self.timeout) and status is None:
-            time.sleep(0.1)  # Small sleep to prevent busy waiting
+            time.sleep(0.001)  # Small sleep to prevent busy waiting
         self.notifier.remove_listener(receive_message)
 
         return status

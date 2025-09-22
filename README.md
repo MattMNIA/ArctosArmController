@@ -40,8 +40,36 @@ Frontend runs at [http://localhost:5173](http://localhost:5173).
 * **WebSocket telemetry** feed (state + joint positions)
 * **Simulation driver** (`SimDriver`) for safe testing
 * Basic React UI for sending commands and viewing telemetry
+* **Teleoperation control** with keyboard and Xbox controller support
 
 ---
+
+## 🎮 Teleoperation Controls
+
+The system supports real-time teleoperation control for precise robotic arm manipulation.
+
+### Keyboard Controls
+- **WASD**: Move arm in XY plane
+- **QE**: Rotate base
+- **RF**: Control elbow and wrist
+- **Space**: Emergency stop
+- **ESC**: Exit teleoperation mode
+
+### Xbox Controller Controls
+- **Left Stick**: XY plane movement
+- **Right Stick**: Elbow and wrist control
+- **Left Trigger**: Rotate base counterclockwise
+- **Right Trigger**: Rotate base clockwise
+- **A Button**: Emergency stop
+- **B Button**: Exit teleoperation mode
+
+### Setup
+1. Ensure pygame is installed: `pip install pygame`
+2. For Xbox controller, connect via USB or Bluetooth
+3. Run teleoperation: Access via API endpoint or integrated UI
+
+### Calibration
+The Xbox controller automatically calibrates deadzones on startup to prevent stick drift. Triggers use a 0.5 threshold to ensure clean release behavior.
 
 ## 📡 Example Usage
 
@@ -69,8 +97,4 @@ socket.on("telemetry", (data) => {
 
 ## 🔮 Roadmap
 
-* Implement **real CAN driver** (`CanDriver`) using `python-can`
 * Add **Inverse Kinematics solver** (`IKSolver`)
-* Extend UI with **3D simulation** (react-three-fiber)
-* Add **logging to WebSocket** for live debug feed
-* Support **gesture input** and **vision-based autonomy**
