@@ -217,6 +217,9 @@ class PyBulletDriver:
         
     def get_feedback(self) -> Dict[str, Any]:
         """Return current joint positions and velocities."""
+        # Step the simulation to advance time
+        p.stepSimulation()
+        
         q = []
         dq = []
         for j in self.joint_indices:
@@ -245,6 +248,38 @@ class PyBulletDriver:
         img = p.getCameraImage(width, height, view_matrix, proj_matrix)
         rgb = np.reshape(img[2], (height, width, 4))[:, :, :3]  # take RGB
         return rgb
+
+    def start_joint_velocity(self, joint_index: int, speed: float) -> None:
+        """Start velocity control for a specific joint. Speed expected in RPM."""
+        if joint_index < 0 or joint_index >= self.num_joints:
+            logger.error(f"Invalid joint index {joint_index}")
+            return
+        
+        # Convert RPM to rad/s
+        speed_rad_s = speed * 2 * 3.14159 / 60
+        actual_joint_idx = self.joint_indices[joint_index]
+        p.setJointMotorControl2(
+            self.robot_id,
+            actual_joint_idx,
+            controlMode=p.VELOCITY_CONTROL,
+            targetVelocity=speed_rad_s
+        )
+        logger.debug(f"Started velocity control for joint {joint_index}: speed={speed} RPM ({speed_rad_s:.2f} rad/s)")
+
+    def stop_joint_velocity(self, joint_index: int) -> None:
+        """Stop velocity control for a specific joint."""
+        if joint_index < 0 or joint_index >= self.num_joints:
+            logger.error(f"Invalid joint index {joint_index}")
+            return
+        
+        actual_joint_idx = self.joint_indices[joint_index]
+        p.setJointMotorControl2(
+            self.robot_id,
+            actual_joint_idx,
+            controlMode=p.VELOCITY_CONTROL,
+            targetVelocity=0.0
+        )
+        logger.debug(f"Stopped velocity control for joint {joint_index}")
 
     def estop(self):
         """Stop motion immediately by zeroing motor torques."""

@@ -6,6 +6,8 @@ class DriverProtocol(Protocol):
     def send_joint_targets(self, q: List[float], t_s: float) -> None: ...
     def open_gripper(self, force: float = 50.0) -> None: ...
     def close_gripper(self, force: float = 50.0) -> None: ...
+    def start_joint_velocity(self, joint_index: int, speed: float) -> None: ...
+    def stop_joint_velocity(self, joint_index: int) -> None: ...
 
 # Import InputController here to avoid circular imports
 from .input.base_input import InputController
@@ -25,61 +27,37 @@ class TeleopController:
 
     def teleop_step(self):
         """
-        Process teleoperation input and send commands directly to the driver.
+        Process teleoperation input and control joints with velocity.
         Called repeatedly in the main control loop.
         """
-        # Get events to update active movements
+        # Get events to start/stop velocities
         events = self.input_controller.get_events()
         for event, joint, scale in events:
-            if event == 'press':
-                self.active_movements[joint] = scale
-            elif event == 'release':
-                if joint in self.active_movements:
-                    del self.active_movements[joint]
+            if isinstance(joint, int) and joint < 6:  # joint indices 0-5
+                if event == 'press':
+                    # Convert scale to speed (RPM), adjust factor as needed
+                    speed = scale * 50.0  # scale from keyboard is like 10, make speed 500 RPM max
+                    self.driver.start_joint_velocity(joint, speed)
+                    self.active_movements[joint] = speed
+                elif event == 'release':
+                    self.driver.stop_joint_velocity(joint)
+                    if joint in self.active_movements:
+                        del self.active_movements[joint]
+            elif joint == "gripper":
+                if event == 'press':
+                    if scale > 0:
+                        self.driver.open_gripper(force=50.0)
+                    else:
+                        self.driver.close_gripper(force=50.0)
 
-        # Also get commands for continuous inputs like axes
-        commands = self.input_controller.get_commands()
-        for j, delta in commands.items():
-            if abs(delta) > 0.01:  # threshold for activity
-                self.active_movements[j] = delta
-            else:
-                if j in self.active_movements:
-                    del self.active_movements[j]
-
-        # Get current feedback to apply deltas
-        feedback = self.driver.get_feedback()
-        q_current = list(feedback.get("q", []))
-
-        # Apply active movements
-        joint_commands = {}
-        gripper_command = None
-
-        for j, scale in self.active_movements.items():
-            if isinstance(j, int) and j < len(q_current):
-                joint_commands[j] = q_current[j] + scale * 0.01  # small step for smoothness
-            elif j == "gripper":
-                gripper_command = scale
-
-        # Send joint commands directly to driver if any
-        if joint_commands:
-            # Convert to list in joint order
-            q_target = []
-            for i in range(len(q_current)):
-                if i in joint_commands:
-                    q_target.append(joint_commands[i])
-                else:
-                    q_target.append(q_current[i])
-
-            # Send directly to driver with appropriate duration
-            self.driver.send_joint_targets(q_target, t_s=0.5)
-
-        # Handle gripper commands directly
-        if gripper_command is not None:
-            if gripper_command > 0:
-                self.driver.open_gripper(force=50.0)
-            else:
-                self.driver.close_gripper(force=50.0)
+        # Maintain velocities for active movements (needed for PyBullet)
+        for joint, speed in self.active_movements.items():
+            if isinstance(joint, int):
+                self.driver.start_joint_velocity(joint, speed)
 
     def stop_all(self):
         """Stop all active teleoperation movements."""
+        for joint in list(self.active_movements.keys()):
+            if isinstance(joint, int):
+                self.driver.stop_joint_velocity(joint)
         self.active_movements.clear()

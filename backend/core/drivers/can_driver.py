@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import cast
 from can import BusABC
 
-from .mks_servo_can.mks_enums import EnableStatus
+from .mks_servo_can.mks_enums import EnableStatus, Direction
 from .mks_servo_can import mks_servo
 from .mks_servo_can.mks_servo import Enable
 from utils.config_manager import ConfigManager
@@ -613,6 +613,53 @@ class CanDriver():
                     logger.debug(f"Emergency stop sent to servo {i+1}: {result}")
                 except Exception as e:
                     logger.error(f"Failed to send emergency stop to servo {i+1}: {e}")
+
+    def start_joint_velocity(self, joint_index: int, speed: float) -> None:
+        """
+        Start velocity control for a specific joint.
+        
+        Args:
+            joint_index: Index of the joint (0-5)
+            speed: Speed in RPM, positive for CW, negative for CCW
+        """
+        if self.bus is None:
+            logger.warning("CAN bus not initialized.")
+            return
+        
+        with self._servo_lock:
+            if joint_index < 0 or joint_index >= len(self.servos):
+                logger.error(f"Invalid joint index {joint_index}")
+                return
+            
+            try:
+                direction = Direction.CW if speed >= 0 else Direction.CCW
+                abs_speed = abs(int(speed))
+                self.servos[joint_index].run_motor_speed_mode(abs_speed, direction)
+                logger.debug(f"Started velocity control for joint {joint_index}: speed={speed} RPM")
+            except Exception as e:
+                logger.error(f"Failed to start velocity control for joint {joint_index}: {e}")
+
+    def stop_joint_velocity(self, joint_index: int) -> None:
+        """
+        Stop velocity control for a specific joint.
+        
+        Args:
+            joint_index: Index of the joint (0-5)
+        """
+        if self.bus is None:
+            logger.warning("CAN bus not initialized.")
+            return
+        
+        with self._servo_lock:
+            if joint_index < 0 or joint_index >= len(self.servos):
+                logger.error(f"Invalid joint index {joint_index}")
+                return
+            
+            try:
+                self.servos[joint_index].stop_motor_in_speed_mode()
+                logger.debug(f"Stopped velocity control for joint {joint_index}")
+            except Exception as e:
+                logger.error(f"Failed to stop velocity control for joint {joint_index}: {e}")
 
     def handle_limits(self, feedback: Dict[str, Any]) -> bool:
         """
