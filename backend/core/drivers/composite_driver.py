@@ -1,3 +1,7 @@
+import threading
+import time
+from typing import List, Any
+
 class CompositeDriver:
     def __init__(self, drivers):
         driver_order = ['CanDriver', 'PyBulletDriver', 'SimDriver']
@@ -25,19 +29,55 @@ class CompositeDriver:
         for d in self.drivers: d.home_joints(joint_indices)
 
     def send_joint_targets(self, q, t_s):
-        for d in self.drivers: d.send_joint_targets(q, t_s)
+        threads = []
+        for d in self.drivers:
+            thread = threading.Thread(target=d.send_joint_targets, args=(q, t_s))
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
 
     def open_gripper(self, force: float = 50.0) -> None:
-        for d in self.drivers: d.open_gripper(force)
+        threads = []
+        for d in self.drivers:
+            thread = threading.Thread(target=d.open_gripper, args=(force,))
+            threads.append(thread)
+            thread.start()
+        
+        for thread in threads:
+            thread.join()
 
     def close_gripper(self, force: float = 50.0) -> None:
-        for d in self.drivers: d.close_gripper(force)
+        threads = []
+        for d in self.drivers:
+            thread = threading.Thread(target=d.close_gripper, args=(force,))
+            threads.append(thread)
+            thread.start()
+        
+        for thread in threads:
+            thread.join()
 
     def set_gripper_position(self, position: float, force: float = 50.0) -> None:
-        for d in self.drivers: d.set_gripper_position(position, force)
+        threads = []
+        for d in self.drivers:
+            thread = threading.Thread(target=d.set_gripper_position, args=(position, force))
+            threads.append(thread)
+            thread.start()
+        
+        for thread in threads:
+            thread.join()
         
     def grasp_object(self, force: float = 100.0) -> None:
-        for d in self.drivers: d.grasp_object(force)
+        threads = []
+        for d in self.drivers:
+            thread = threading.Thread(target=d.grasp_object, args=(force,))
+            threads.append(thread)
+            thread.start()
+        
+        for thread in threads:
+            thread.join()
 
     def get_feedback(self):
         # Return feedback from the real arm (first driver)

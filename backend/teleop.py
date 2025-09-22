@@ -13,13 +13,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", choices=["xbox", "keyboard"], default="keyboard")
     args = parser.parse_args()
-    pybullet_driver = PyBulletDriver(gui=True, urdf_path="C:\\Users\\mattm\\OneDrive - Iowa State University\\Personal Projects\\ArctosArm\\ArctosArmController\\backend\\models\\urdf\\arctos_urdf.urdf")
+    # pybullet_driver = PyBulletDriver(gui=True, urdf_path="C:\\Users\\mattm\\OneDrive - Iowa State University\\Personal Projects\\ArctosArm\\ArctosArmController\\backend\\models\\urdf\\arctos_urdf.urdf")
     can_driver = CanDriver()
-    comp_driver = CompositeDriver([pybullet_driver, can_driver])
+    comp_driver = CompositeDriver([can_driver])
     
     # Connect and enable the driver directly
-    comp_driver.connect()
-    comp_driver.enable()
+    can_driver.connect()
+    can_driver.enable()
     
     # Choose input method
     if args.input == "xbox":
@@ -28,7 +28,7 @@ def main():
         controller = KeyboardController()
 
     # Create teleop controller with driver
-    teleop_controller = TeleopController(controller, comp_driver)
+    teleop_controller = TeleopController(controller, can_driver)
 
     print(f"Running teleop with {args.input} input...")
     run_teleop_loop(teleop_controller)
