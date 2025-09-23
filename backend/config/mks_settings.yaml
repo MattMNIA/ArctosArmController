@@ -19,19 +19,19 @@ servo_1:
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 60
-  homing_offset: 20000
+  homing_offset: 236000
   microsteps: 16
   work_mode: SrvFoc
 servo_2:
   current: 1600
   direction: CW
   enable_homing: Enable
-  endstop_enabled: false  # Temporarily disable to test
+  endstop_enabled: false
   endstop_level: Low
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 60
-  homing_offset: 20000
+  homing_offset: 238796
   microsteps: 16
   work_mode: SrvFoc
 servo_3:

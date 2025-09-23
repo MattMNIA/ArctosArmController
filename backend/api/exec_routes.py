@@ -125,6 +125,88 @@ def home_joints():
     logger.info("Home joints command enqueued: %s", joint_indices)
     return jsonify({"status": "homing joints", "joint_indices": joint_indices})
 
+@exec_bp.route('/save_offset', methods=['POST'])
+def save_offset():
+    try:
+        payload = request.get_json(silent=True)
+    except Exception as e:
+        logger.error(f"Error parsing JSON for save_offset: {e}")
+        return jsonify({"error": "Invalid JSON payload"}), 400
+    
+    if not payload:
+        return jsonify({"error": "No payload"}), 400
+    
+    joint_index = payload.get('joint_index')
+    
+    if joint_index is None or not isinstance(joint_index, int):
+        return jsonify({"error": "Invalid or missing 'joint_index'"}), 400
+    
+    motion_service = current_app.config['motion_service']
+    if not motion_service.running:
+        logger.error("MotionService is not running")
+        return jsonify({"error": "MotionService not running"}), 500
+    
+    # Get current joint position and convert to encoder units
+    feedback = motion_service.driver.get_feedback()
+    current_q = feedback.get("q", [])
+    
+    if joint_index >= len(current_q):
+        return jsonify({"error": f"Joint index {joint_index} out of range"}), 400
+    
+    # Convert current joint angle to encoder units
+    current_angle = current_q[joint_index]
+    
+    # Check if driver has angle_to_encoder method (only CanDriver has it)
+    from core.drivers.can_driver import CanDriver
+    from core.drivers.composite_driver import CompositeDriver
+    
+    if isinstance(motion_service.driver, CanDriver):
+        encoder_value = motion_service.driver.angle_to_encoder(current_angle, joint_index)
+    elif isinstance(motion_service.driver, CompositeDriver):
+        # Find the CanDriver in the composite driver
+        can_driver = None
+        for driver in motion_service.driver.drivers:
+            if isinstance(driver, CanDriver):
+                can_driver = driver
+                break
+        if can_driver is None:
+            return jsonify({"error": "No CAN driver found for encoder conversion"}), 400
+        encoder_value = can_driver.angle_to_encoder(current_angle, joint_index)
+    else:
+        return jsonify({"error": "Driver does not support encoder conversion"}), 400
+    
+    # Save offset to config
+    try:
+        from utils.config_manager import ConfigManager
+        from pathlib import Path
+        
+        config_path = Path(__file__).parent.parent / "config" / "mks_settings.yaml"
+        config_manager = ConfigManager(config_path)
+        
+        servo_key = f"servo_{joint_index}"
+        current_config = config_manager.get(servo_key, {})
+        current_homing_offset = current_config.get('homing_offset', 0)
+        current_config['homing_offset'] = -encoder_value + current_homing_offset
+        
+        # Update the config
+        config_manager.set(servo_key, current_config)
+        config_manager.save_config()
+        
+        new_offset = -encoder_value + current_homing_offset
+        
+        logger.info("Saved offset for joint %d: %d encoder units (current: %d, previous: %d, angle: %.4f rad)", 
+                    joint_index, new_offset, -encoder_value, current_homing_offset, current_angle)
+        return jsonify({
+            "status": "offset saved",
+            "joint_index": joint_index,
+            "offset_encoder": new_offset,
+            "current_angle": current_angle
+        })
+        
+    except Exception as e:
+        logger.error(f"Error saving offset: {e}")
+        return jsonify({"error": f"Failed to save offset: {str(e)}"}), 500
+
 @exec_bp.route('/estop', methods=['POST'])
 def estop():
     """Emergency stop all motors."""
@@ -135,4 +217,5 @@ def estop():
     motion_service.estop()
     logger.warning("Emergency stop executed via API")
     return jsonify({"status": "emergency stop executed"})
+
 

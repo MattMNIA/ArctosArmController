@@ -230,8 +230,6 @@ class CanDriver():
                     logger.debug(f"✅ Limit port enabled on Servo {index}")
                 except Exception as e:
                     logger.error(f"⚠️ Failed to enable limit port on Servo {index}: {e}")
-                    
-        # Check that all servos are enabled
         for i, servo in enumerate(self.servos, start=1):
             try:
                 status = servo.read_en_pins_status()

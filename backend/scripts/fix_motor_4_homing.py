@@ -7,10 +7,7 @@ import sys
 import os
 import logging
 from pathlib import Path
-
-# Add the backend directory to the Python path
-backend_dir = Path(__file__).parent.parent / "backend"
-sys.path.insert(0, str(backend_dir))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import can
 import time
@@ -51,24 +48,6 @@ def configure_motor_settings(servo, motor_id):
     settings_applied = []
 
     try:
-        # 1. Set work mode
-        logger.info("Setting work mode to SrvFoc...")
-        result = servo.set_work_mode(WorkMode.SrvFoc)
-        if result == SuccessStatus.Success:
-            logger.info("✓ Work mode set successfully")
-            settings_applied.append("work_mode")
-        else:
-            logger.error(f"✗ Failed to set work mode: {result}")
-
-        # 2. Set working current
-        logger.info("Setting working current to 1600 mA...")
-        result = servo.set_working_current(1600)
-        if result == SuccessStatus.Success:
-            logger.info("✓ Working current set successfully")
-            settings_applied.append("current")
-        else:
-            logger.error(f"✗ Failed to set working current: {result}")
-
         # 3. Set motor rotation direction
         logger.info("Setting motor rotation direction to CCW...")
         result = servo.set_motor_rotation_direction(Direction.CCW)
@@ -78,32 +57,7 @@ def configure_motor_settings(servo, motor_id):
         else:
             logger.error(f"✗ Failed to set motor direction: {result}")
 
-        # 4. Set holding current
-        logger.info("Setting holding current to FIFTHTY_PERCENT...")
-        result = servo.set_holding_current(HoldingStrength.FIFTHTY_PERCENT)
-        if result == SuccessStatus.Success:
-            logger.info("✓ Holding current set successfully")
-            settings_applied.append("holding")
-        else:
-            logger.error(f"✗ Failed to set holding current: {result}")
 
-        # 5. Set subdivisions (microsteps)
-        logger.info("Setting subdivisions to 16...")
-        result = servo.set_subdivisions(16)
-        if result == SuccessStatus.Success:
-            logger.info("✓ Subdivisions set successfully")
-            settings_applied.append("microsteps")
-        else:
-            logger.error(f"✗ Failed to set subdivisions: {result}")
-
-        # 6. Set shaft protection
-        logger.info("Enabling motor shaft locked rotor protection...")
-        result = servo.set_motor_shaft_locked_rotor_protection(Enable.Enable)
-        if result == SuccessStatus.Success:
-            logger.info("✓ Shaft protection enabled successfully")
-            settings_applied.append("shaft_protect")
-        else:
-            logger.error(f"✗ Failed to set shaft protection: {result}")
 
         # 7. Set homing parameters
         logger.info("Setting homing parameters (direction=CCW, trigger=Low, speed=80)...")
@@ -119,15 +73,6 @@ def configure_motor_settings(servo, motor_id):
         else:
             logger.error(f"✗ Failed to set homing parameters: {result}")
 
-        # 8. Enable limit port (for endstop_enabled: true)
-        logger.info("Enabling limit port...")
-        result = servo.set_limit_port_remap(Enable.Enable)
-        if result == SuccessStatus.Success:
-            logger.info("✓ Limit port enabled successfully")
-            settings_applied.append("endstop_enabled")
-        else:
-            logger.error(f"✗ Failed to enable limit port: {result}")
-
         logger.info(f"Configuration complete. Settings applied: {settings_applied}")
         return len(settings_applied) > 0
 
@@ -139,7 +84,7 @@ def main():
     # CAN bus configuration
     can_interface = "COM4"  # Adjust as needed
     bitrate = 500000
-    motor_id = 5  # Motor ID 05 (servo_4)
+    motor_id = 4  # Motor ID 04 (servo_4)
 
     logger.info(f"Restoring motor ID {motor_id} (servo_4) with specified settings...")
 
