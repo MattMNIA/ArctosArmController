@@ -50,7 +50,7 @@ def configure_motor_settings(servo, motor_id):
     try:
         # 3. Set motor rotation direction
         logger.info("Setting motor rotation direction to CCW...")
-        result = servo.set_motor_rotation_direction(Direction.CCW)
+        result = servo.set_motor_rotation_direction(Direction.CW)
         if result == SuccessStatus.Success:
             logger.info("✓ Motor direction set successfully")
             settings_applied.append("direction")
@@ -60,18 +60,18 @@ def configure_motor_settings(servo, motor_id):
 
 
         # 7. Set homing parameters
-        logger.info("Setting homing parameters (direction=CCW, trigger=Low, speed=80)...")
-        result = servo.set_home(
-            homeTrig=EndStopLevel.Low,    # endstop_level: Low
-            homeDir=Direction.CCW,         # home_direction: CCW
-            homeSpeed=80,                  # home_speed: 80
-            endLimit=Enable.Enable         # enable_homing: Enable
-        )
-        if result == SuccessStatus.Success:
-            logger.info("✓ Homing parameters set successfully")
-            settings_applied.extend(["home_direction", "endstop_level", "home_speed", "enable_homing"])
-        else:
-            logger.error(f"✗ Failed to set homing parameters: {result}")
+        # logger.info("Setting homing parameters (direction=CCW, trigger=Low, speed=80)...")
+        # result = servo.set_home(
+        #     homeTrig=EndStopLevel.Low,    # endstop_level: Low
+        #     homeDir=Direction.CCW,         # home_direction: CCW
+        #     homeSpeed=80,                  # home_speed: 80
+        #     endLimit=Enable.Enable         # enable_homing: Enable
+        # )
+        # if result == SuccessStatus.Success:
+        #     logger.info("✓ Homing parameters set successfully")
+        #     settings_applied.extend(["home_direction", "endstop_level", "home_speed", "enable_homing"])
+        # else:
+        #     logger.error(f"✗ Failed to set homing parameters: {result}")
 
         logger.info(f"Configuration complete. Settings applied: {settings_applied}")
         return len(settings_applied) > 0
@@ -84,7 +84,7 @@ def main():
     # CAN bus configuration
     can_interface = "COM4"  # Adjust as needed
     bitrate = 500000
-    motor_id = 4  # Motor ID 04 (servo_4)
+    motor_id = 3  # Motor ID 04 (servo_4)
 
     logger.info(f"Restoring motor ID {motor_id} (servo_4) with specified settings...")
 
@@ -118,14 +118,7 @@ def main():
         for attempt in range(max_retries):
             status = servo.read_en_pins_status()
             logger.info(f"Motor enable status (attempt {attempt+1}): {status}")
-            if status == EnableStatus.Enabled:
-                break
-            elif attempt < max_retries - 1:
-                logger.warning(f"Motor not enabled, retrying... (attempt {attempt+1}/{max_retries})")
-                time.sleep(0.5)
-            else:
-                logger.error("Failed to enable motor")
-                return 1
+           
 
         # Configure motor settings
         success = configure_motor_settings(servo, motor_id)

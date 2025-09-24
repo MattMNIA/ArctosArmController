@@ -43,7 +43,7 @@ servo_3:
   holding: FIFTHTY_PERCENT
   home_direction: CW
   home_speed: 90
-  homing_offset: 30000
+  homing_offset: 203333
   microsteps: 16
   shaft_protect: false
   work_mode: SrvFoc

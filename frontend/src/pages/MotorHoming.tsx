@@ -68,11 +68,30 @@ export default function MotorHoming() {
 
   const toggleMotor = (motorId: number) => {
     const newSelected = new Set(selectedMotors);
-    if (newSelected.has(motorId)) {
-      newSelected.delete(motorId);
+    
+    // Special handling for motors 4 and 5 - they must be homed together
+    if (motorId === 4 || motorId === 5) {
+      const motor4Selected = newSelected.has(4);
+      const motor5Selected = newSelected.has(5);
+      
+      // If either motor 4 or 5 is currently selected, deselect both
+      // If neither is selected, select both
+      if (motor4Selected || motor5Selected) {
+        newSelected.delete(4);
+        newSelected.delete(5);
+      } else {
+        newSelected.add(4);
+        newSelected.add(5);
+      }
     } else {
-      newSelected.add(motorId);
+      // Normal behavior for other motors
+      if (newSelected.has(motorId)) {
+        newSelected.delete(motorId);
+      } else {
+        newSelected.add(motorId);
+      }
     }
+    
     setSelectedMotors(newSelected);
   };
 
@@ -291,13 +310,23 @@ export default function MotorHoming() {
                     onChange={() => toggleMotor(motorId)}
                     className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                   />
-                  <span className="font-semibold text-lg">Motor {motorId}</span>
+                  <span className="font-semibold text-lg">
+                    Motor {motorId}
+                    {(motorId === 4 || motorId === 5) && (
+                      <span className="text-xs text-blue-600 dark:text-blue-400 ml-1">
+                        (paired)
+                      </span>
+                    )}
+                  </span>
                 </div>
                 {getStatusIcon(motorId)}
               </div>
               
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                Joint {motorId} homing control
+                {motorId === 4 || motorId === 5 
+                  ? `Joint ${motorId} (end effector - homed with motor ${motorId === 4 ? 5 : 4})`
+                  : `Joint ${motorId} homing control`
+                }
               </p>
               
               {/* Encoder value display */}
