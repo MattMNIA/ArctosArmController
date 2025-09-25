@@ -69,27 +69,11 @@ export default function MotorHoming() {
   const toggleMotor = (motorId: number) => {
     const newSelected = new Set(selectedMotors);
     
-    // Special handling for motors 4 and 5 - they must be homed together
-    if (motorId === 4 || motorId === 5) {
-      const motor4Selected = newSelected.has(4);
-      const motor5Selected = newSelected.has(5);
-      
-      // If either motor 4 or 5 is currently selected, deselect both
-      // If neither is selected, select both
-      if (motor4Selected || motor5Selected) {
-        newSelected.delete(4);
-        newSelected.delete(5);
-      } else {
-        newSelected.add(4);
-        newSelected.add(5);
-      }
+    // Normal behavior for all motors - joints are now independent
+    if (newSelected.has(motorId)) {
+      newSelected.delete(motorId);
     } else {
-      // Normal behavior for other motors
-      if (newSelected.has(motorId)) {
-        newSelected.delete(motorId);
-      } else {
-        newSelected.add(motorId);
-      }
+      newSelected.add(motorId);
     }
     
     setSelectedMotors(newSelected);
@@ -214,7 +198,7 @@ export default function MotorHoming() {
 
       const result = await response.json();
       console.log('Offset saved:', result);
-      alert(`Offset saved for Motor ${jointIndex}: ${result.offset_encoder} encoder units`);
+      alert(`Offset saved for Joint ${jointIndex}: ${result.offset_encoder} encoder units`);
     } catch (error) {
       console.error('Error saving offset:', error);
       setError(error instanceof Error ? error.message : 'Failed to save offset');
@@ -265,7 +249,7 @@ export default function MotorHoming() {
     <section className="py-8 min-h-screen">
       <div className="max-w-4xl mx-auto px-4">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">Motor Homing Control</h1>
+          <h1 className="text-3xl font-bold">Joint Homing Control</h1>
           <div className="flex space-x-2">
             <button
               onClick={selectAll}
@@ -311,36 +295,45 @@ export default function MotorHoming() {
                     className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                   />
                   <span className="font-semibold text-lg">
-                    Motor {motorId}
-                    {(motorId === 4 || motorId === 5) && (
-                      <span className="text-xs text-blue-600 dark:text-blue-400 ml-1">
-                        (paired)
-                      </span>
-                    )}
-                  </span>
+                    Joint {motorId} </span>
                 </div>
                 {getStatusIcon(motorId)}
               </div>
               
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                {motorId === 4 || motorId === 5 
-                  ? `Joint ${motorId} (end effector - homed with motor ${motorId === 4 ? 5 : 4})`
-                  : `Joint ${motorId} homing control`
+                {motorId === 4 
+                  ? `Joint ${motorId} (end effector - motors move opposite directions)`
+                  : motorId === 5
+                  ? `Joint ${motorId} (end effector - motors move same direction)`
+                  : `Joint ${motorId} control`
                 }
               </p>
               
               {/* Encoder value display */}
-              {encoderValues[motorId] !== undefined && (
-                <p className="text-xs text-gray-500 dark:text-gray-500 mb-2">
-                  Encoder: {encoderValues[motorId]}
-                </p>
+              {motorId === 4 || motorId === 5 ? (
+                <div className="text-xs text-gray-500 dark:text-gray-500 mb-2">
+                  <p>Motor {motorId}: {encoderValues[motorId] !== undefined ? encoderValues[motorId] : 'N/A'}</p>
+                  <p>Motor {motorId === 4 ? 5 : 4}: {encoderValues[motorId === 4 ? 5 : 4] !== undefined ? encoderValues[motorId === 4 ? 5 : 4] : 'N/A'}</p>
+                  <p className="text-xs italic">
+                    {motorId === 4 
+                      ? 'Joint 4 moves motors in opposite directions'
+                      : 'Joint 5 moves motors in same direction'
+                    }
+                  </p>
+                </div>
+              ) : (
+                encoderValues[motorId] !== undefined && (
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mb-2">
+                    Encoder: {encoderValues[motorId]}
+                  </p>
+                )
               )}
               
               {/* Adjustment controls for successfully homed motors */}
               {homingStatus[motorId] === 'success' && (
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">Offset Adjustment</span>
+                    <span className="text-sm font-medium">Joint Offset Adjustment</span>
                     <button
                       onClick={() => toggleAdjustment(motorId)}
                       className="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded"
@@ -391,11 +384,11 @@ export default function MotorHoming() {
         <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-6">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-semibold mb-2">Homing Control</h2>
+              <h2 className="text-xl font-semibold mb-2">Joint Homing Control</h2>
               <p className="text-gray-600 dark:text-gray-400">
                 {selectedMotors.size === 0
-                  ? 'Select motors to home'
-                  : `${selectedMotors.size} motor${selectedMotors.size === 1 ? '' : 's'} selected for homing`
+                  ? 'Select joints to home'
+                  : `${selectedMotors.size} joint${selectedMotors.size === 1 ? '' : 's'} selected for homing`
                 }
               </p>
             </div>
@@ -406,7 +399,7 @@ export default function MotorHoming() {
             >
               <Home className="w-5 h-5" />
               <span>
-                {isHomingAll ? 'Homing Motors...' : 'Home Selected Motors'}
+                {isHomingAll ? 'Homing Joints...' : 'Home Selected Joints'}
               </span>
               {isHomingAll && <Loader className="w-5 h-5 animate-spin" />}
             </button>
@@ -415,15 +408,18 @@ export default function MotorHoming() {
 
         {/* Instructions */}
         <div className="mt-8 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">Homing Instructions</h3>
+          <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">Joint Homing Instructions</h3>
           <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-            <li>• Select individual motors or use "Select All" to choose all motors</li>
-            <li>• Click "Home Selected Motors" to start the homing process</li>
-            <li>• Each motor will home sequentially using configured parameters</li>
+            <li>• Select individual joints or use "Select All" to choose all joints</li>
+            <li>• Joints 4 and 5 control the end effector motors (4 and 5)</li>
+            <li>• Joint 4 moves motors 4 and 5 in opposite directions</li>
+            <li>• Joint 5 moves motors 4 and 5 in the same direction</li>
+            <li>• Click "Home Selected Joints" to start the homing process</li>
+            <li>• Each joint will home sequentially using configured parameters</li>
             <li>• Green checkmarks indicate successful homing</li>
             <li>• Red warning icons indicate homing failures</li>
-            <li>• After homing, click "Adjust" on successfully homed motors to fine-tune position</li>
-            <li>• Enter degrees to move (+/-) and click "Move" to adjust the motor position</li>
+            <li>• After homing, click "Adjust" on successfully homed joints to fine-tune position</li>
+            <li>• Enter degrees to move (+/-) and click "Move" to adjust the joint position</li>
             <li>• Click "Save Offset" to save the current position as the new homing offset</li>
           </ul>
         </div>

@@ -1,8 +1,81 @@
 can_driver:
-  gear_ratios: [13.5, 150, 150, 66, 33, 33]
-  encoder_resolution: 16384
-  can_interface: "COM4"  # or "can0" on Linux
   bitrate: 500000
-  default_speed: 2000  # Reduced from 500 to 200 RPM
-  default_acc: 150    # Reduced from 150 to 50 RPM/s  
-  coupled_axis_mode: True  # Enable differential drive for joints 5 and 6  
+  can_interface: COM4
+  encoder_resolution: 16384
+  gear_ratios:
+  - 13.5
+  - 150
+  - 150
+  - 66
+  - 33
+  - 33
+  motors:
+  - id: 0
+    speed_rpm: 200
+    acceleration: 50
+    homing_offset: -99195
+    home_direction: CCW
+    home_speed: 30
+    endstop_level: High
+  - id: 1
+    speed_rpm: 20
+    acceleration: 10
+    homing_offset: -236000
+    home_direction: CCW
+    home_speed: 60
+    endstop_level: High
+  - id: 2
+    speed_rpm: 200
+    acceleration: 50
+    homing_offset: -238796
+    home_direction: CCW
+    home_speed: 60
+    endstop_level: Low
+  - id: 3
+    speed_rpm: 200
+    acceleration: 50
+    homing_offset: 209212
+    home_direction: CW
+    home_speed: 90
+    endstop_level: Low
+  - id: 4
+    speed_rpm: 500
+    acceleration: 40
+    homing_offset: 116474
+    home_direction: CCW
+    home_speed: 80
+    endstop_level: Low
+  - id: 5
+    speed_rpm: 500
+    acceleration: 40
+    homing_offset: 20000
+    home_direction: CCW
+    home_speed: 60
+    endstop_level: Low
+joints:
+  coupled_mode: true
+  joint_definitions:
+  - index: 0
+    motor_id: 0
+    type: single
+  - index: 1
+    motor_id: 1
+    type: single
+  - index: 2
+    motor_id: 2
+    type: single
+  - index: 3
+    motor_id: 3
+    type: single
+  - coupling: subtract
+    index: 4
+    motor_ids:
+    - 4
+    - 5
+    type: differential
+  - coupling: add
+    index: 5
+    motor_ids:
+    - 4
+    - 5
+    type: differential

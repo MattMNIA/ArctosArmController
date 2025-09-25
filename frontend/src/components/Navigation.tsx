@@ -16,6 +16,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'dashboard', label: 'Arm Dashboard' },
     { id: 'simulation', label: 'Simulation Video' },
     { id: 'homing', label: 'Motor Homing' },
+    { id: 'config', label: 'Motor Config' },
     { id: 'visualization', label: '3D Visualization' },
   ];
 

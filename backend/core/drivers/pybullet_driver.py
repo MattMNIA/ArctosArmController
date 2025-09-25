@@ -249,11 +249,15 @@ class PyBulletDriver:
         rgb = np.reshape(img[2], (height, width, 4))[:, :, :3]  # take RGB
         return rgb
 
-    def start_joint_velocity(self, joint_index: int, speed: float) -> None:
-        """Start velocity control for a specific joint. Speed expected in RPM."""
+    def start_joint_velocity(self, joint_index: int, scale: float) -> None:
+        """Start velocity control for a specific joint. Scale from -1.0 to 1.0."""
         if joint_index < 0 or joint_index >= self.num_joints:
             logger.error(f"Invalid joint index {joint_index}")
             return
+        
+        # Scale by default max speed (similar to CAN driver motors)
+        max_speed_rpm = 200.0  # Default max speed for simulation
+        speed = scale * max_speed_rpm
         
         # Convert RPM to rad/s
         speed_rad_s = speed * 2 * 3.14159 / 60

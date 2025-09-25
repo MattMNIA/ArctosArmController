@@ -7,6 +7,7 @@ from api.exec_routes import exec_bp
 from api.teleop_routes import teleop_bp
 from api.status_routes import status_bp
 from api.sim_routes import sim_bp
+from api.config_routes import config_bp
 from api.ws_routes import init_websocket_events, has_active_connections
 from core.drivers import composite_driver
 from core.motion_service import MotionService
@@ -65,6 +66,7 @@ def create_app(drivers_list):
     app.register_blueprint(teleop_bp, url_prefix='/api/teleop')
     app.register_blueprint(status_bp, url_prefix='/api/status')
     app.register_blueprint(sim_bp, url_prefix='/api/sim')
+    app.register_blueprint(config_bp, url_prefix='/api/config')
 
     # Initialize WebSocket event handlers
     init_websocket_events(socketio)

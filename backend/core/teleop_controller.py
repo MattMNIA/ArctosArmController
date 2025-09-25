@@ -6,7 +6,7 @@ class DriverProtocol(Protocol):
     def send_joint_targets(self, q: List[float], t_s: float) -> None: ...
     def open_gripper(self, force: float = 50.0) -> None: ...
     def close_gripper(self, force: float = 50.0) -> None: ...
-    def start_joint_velocity(self, joint_index: int, speed: float) -> None: ...
+    def start_joint_velocity(self, joint_index: int, scale: float) -> None: ...
     def stop_joint_velocity(self, joint_index: int) -> None: ...
 
 # Import InputController here to avoid circular imports
@@ -35,10 +35,9 @@ class TeleopController:
         for event, joint, scale in events:
             if isinstance(joint, int) and joint < 6:  # joint indices 0-5
                 if event == 'press':
-                    # Convert scale to speed (RPM), adjust factor as needed
-                    speed = scale * 10.0  # scale from keyboard is like 10, make speed 500 RPM max
-                    self.driver.start_joint_velocity(joint, speed)
-                    self.active_movements[joint] = speed
+                    # Pass scale (-1 to 1) directly to driver for motor-specific scaling
+                    self.driver.start_joint_velocity(joint, scale)
+                    self.active_movements[joint] = scale
                 elif event == 'release':
                     self.driver.stop_joint_velocity(joint)
                     if joint in self.active_movements:

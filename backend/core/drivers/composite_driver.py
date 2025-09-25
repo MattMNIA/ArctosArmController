@@ -79,10 +79,10 @@ class CompositeDriver:
         for thread in threads:
             thread.join()
 
-    def start_joint_velocity(self, joint_index: int, speed: float) -> None:
+    def start_joint_velocity(self, joint_index: int, scale: float) -> None:
         threads = []
         for d in self.drivers:
-            thread = threading.Thread(target=d.start_joint_velocity, args=(joint_index, speed))
+            thread = threading.Thread(target=d.start_joint_velocity, args=(joint_index, scale))
             threads.append(thread)
             thread.start()
         

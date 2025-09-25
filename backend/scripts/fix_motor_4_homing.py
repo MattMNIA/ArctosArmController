@@ -105,7 +105,14 @@ def main():
         servo = MksServo(bus, notifier, motor_id)
 
         logger.info(f"Connected to motor ID {motor_id}")
-
+        # Try reading a parameter from the servo to check communication
+        try:
+            logger.info("Attempting to read current position from servo...")
+            position = servo.()
+            logger.info(f"Successfully read position: {position}")
+        except Exception as e:
+            logger.error(f"Failed to read from servo: {e}")
+            return 1
         # Enable the motor first
         logger.info("Enabling motor...")
         servo.enable_motor(Enable.Enable)

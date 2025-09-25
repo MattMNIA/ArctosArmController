@@ -15,7 +15,7 @@ class ConfigManager:
 
     def save_config(self):
         with open(self.config_path, 'w') as f:
-            yaml.dump(self.config, f, default_flow_style=False)
+            yaml.dump(self.config, f, default_flow_style=False, sort_keys=False)
 
     def get(self, key: str, default: Any = None) -> Any:
         keys = key.split('.')

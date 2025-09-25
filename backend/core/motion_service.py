@@ -5,6 +5,8 @@ from typing import Dict, Any, List, Optional, Callable, Protocol, Union
 import logging
 from abc import ABC, abstractmethod
 from core.drivers.sim_driver import SimDriver
+from core.drivers.can_driver import CanDriver
+from core.drivers.composite_driver import CompositeDriver
 
 logger = logging.getLogger(__name__)
 
@@ -262,31 +264,31 @@ class MotionService:
                 self.paused = True
                 self.current_state = "LIMIT_HIT"
 
-            # Convert joint angles to encoder values
+            # Get encoder values - prefer motor encoders if available, otherwise convert joint angles
             joint_angles = feedback.get("q", [])
-            encoders = []
+            motor_encoders = feedback.get("motor_encoders")
             
-            # Check if driver has angle_to_encoder method (only CanDriver has it)
-            from core.drivers.can_driver import CanDriver
-            from core.drivers.composite_driver import CompositeDriver
-            
-            # Find the CanDriver to use for conversion
-            can_driver = None
-            if isinstance(self.driver, CanDriver):
-                can_driver = self.driver
-            elif isinstance(self.driver, CompositeDriver):
-                for driver in self.driver.drivers:
-                    if isinstance(driver, CanDriver):
-                        can_driver = driver
-                        break
-            
-            if can_driver is not None:
-                for i, angle in enumerate(joint_angles):
-                    encoder_value = can_driver.angle_to_encoder(angle, i)
-                    encoders.append(encoder_value)
+            if motor_encoders is not None:
+                encoders = motor_encoders
             else:
-                # Fallback: use joint angles as-is if no CanDriver found
-                encoders = joint_angles.copy()
+                # Fallback: convert joint angles to encoder values
+                encoders = []
+                can_driver = None
+                if isinstance(self.driver, CanDriver):
+                    can_driver = self.driver
+                elif isinstance(self.driver, CompositeDriver):
+                    for driver in self.driver.drivers:
+                        if isinstance(driver, CanDriver):
+                            can_driver = driver
+                            break
+                
+                if can_driver is not None:
+                    for i, angle in enumerate(joint_angles):
+                        encoder_value = can_driver.angle_to_encoder(angle, i)
+                        encoders.append(encoder_value)
+                else:
+                    # Fallback: use joint angles as-is if no CanDriver found
+                    encoders = joint_angles.copy()
 
             event = {
                 "state": self.current_state,

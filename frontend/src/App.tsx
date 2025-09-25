@@ -8,6 +8,7 @@ import ArmDashboard from './pages/ArmDashboard';
 import SimulationVideo from './pages/SimulationVideo';
 import MotorHoming from './pages/MotorHoming';
 import ArmVisualization from './pages/ArmVisualization';
+import MotorConfig from './pages/MotorConfig';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('visualization');
@@ -24,6 +25,8 @@ function App() {
         return <MotorHoming />;
       case 'visualization':
         return <ArmVisualization />;
+      case 'config':
+        return <MotorConfig />;
       case 'control':
       default:
         return <RobotControl />;

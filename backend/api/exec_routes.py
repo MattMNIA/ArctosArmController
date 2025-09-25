@@ -180,19 +180,48 @@ def save_offset():
         from utils.config_manager import ConfigManager
         from pathlib import Path
         
-        config_path = Path(__file__).parent.parent / "config" / "mks_settings.yaml"
+        config_path = Path(__file__).parent.parent / "config" / "default.yml"
         config_manager = ConfigManager(config_path)
         
-        servo_key = f"servo_{joint_index}"
-        current_config = config_manager.get(servo_key, {})
-        current_homing_offset = current_config.get('homing_offset', 0)
-        current_config['homing_offset'] = -encoder_value + current_homing_offset
+        # Get the motors list and find the motor with matching ID
+        motors = config_manager.get('can_driver.motors', [])
+        motor_config = None
+        motor_index = -1
+        
+        for i, motor in enumerate(motors):
+            if motor.get('id') == joint_index:
+                motor_config = motor
+                motor_index = i
+                break
+        
+        if motor_config is None:
+            return jsonify({"error": f"Motor with id {joint_index} not found in config"}), 400
+        
+        # Update the homing offset
+        current_homing_offset = motor_config.get('homing_offset', 0)
+        motor_config['homing_offset'] = -encoder_value + current_homing_offset
+        motors[motor_index] = motor_config
         
         # Update the config
-        config_manager.set(servo_key, current_config)
+        config_manager.set('can_driver.motors', motors)
         config_manager.save_config()
         
-        new_offset = -encoder_value + current_homing_offset
+        new_offset = motor_config['homing_offset']
+        
+        # Reload configuration in the running driver if it supports it
+        try:
+            if isinstance(motion_service.driver, CanDriver):
+                motion_service.driver.reload_config()
+                logger.info("Configuration reloaded in CanDriver")
+            elif isinstance(motion_service.driver, CompositeDriver):
+                # Find the CanDriver in the composite driver and reload its config
+                for driver in motion_service.driver.drivers:
+                    if isinstance(driver, CanDriver):
+                        driver.reload_config()
+                        logger.info("Configuration reloaded in CanDriver within CompositeDriver")
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to reload configuration in running driver: {e}")
         
         logger.info("Saved offset for joint %d: %d encoder units (current: %d, previous: %d, angle: %.4f rad)", 
                     joint_index, new_offset, -encoder_value, current_homing_offset, current_angle)
