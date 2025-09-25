@@ -48,10 +48,6 @@ def create_app(drivers_list):
     if 'can' in drivers_list:
         can_driver = CanDriver()
         drivers.append(can_driver)
-    if not drivers:
-        # Default to sim if none
-        sim_driver = SimDriver()
-        drivers.append(sim_driver)
     comp_driver = CompositeDriver(drivers)
     # Initialize MotionService
     motion_service = MotionService(driver=comp_driver, loop_hz=50)
@@ -75,8 +71,8 @@ def create_app(drivers_list):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the Arctos Arm Controller")
-    parser.add_argument('--drivers', nargs='+', choices=['sim', 'pybullet', 'can'], default=['sim', 'pybullet', 'can'], help="Specify which drivers to use")
-    parser.add_argument('--teleop', choices=['keyboard', 'xbox'], help="Enable teleoperation with specified input device")
+    parser.add_argument('--drivers', nargs='+', choices=['sim', 'pybullet', 'can'], default=['can'], help="Specify which drivers to use")
+    parser.add_argument('--teleop', choices=['keyboard', 'xbox'], default='xbox', help="Enable teleoperation with specified input device")
     args = parser.parse_args()
     app = create_app(args.drivers)
     
