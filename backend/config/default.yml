@@ -3,6 +3,6 @@ can_driver:
   encoder_resolution: 16384
   can_interface: "COM4"  # or "can0" on Linux
   bitrate: 500000
-  default_speed: 500  # Reduced from 500 to 200 RPM
-  default_acc: 50    # Reduced from 150 to 50 RPM/s  
+  default_speed: 2000  # Reduced from 500 to 200 RPM
+  default_acc: 150    # Reduced from 150 to 50 RPM/s  
   coupled_axis_mode: True  # Enable differential drive for joints 5 and 6  

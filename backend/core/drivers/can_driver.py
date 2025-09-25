@@ -25,13 +25,21 @@ class CanDriver():
         config_path = Path(__file__).parent.parent.parent / "config" / "default.yml"
         self.config_manager = ConfigManager(config_path)
         self.coupled_mode = self.config_manager.get('can_driver.coupled_axis_mode', False)
-        logger.info(f"CanDriver initialized with coupled_mode={self.coupled_mode}")
         self.gear_ratios = self.config_manager.get('can_driver.gear_ratios', [1.0] * 6)
         self.encoder_resolution = self.config_manager.get('can_driver.encoder_resolution', 16384)
         self.can_interface = self.config_manager.get('can_driver.can_interface', 'COM4')
         self.bitrate = self.config_manager.get('can_driver.bitrate', 500000)
         self.default_speed = self.config_manager.get('can_driver.default_speed', 200)
         self.default_acc = self.config_manager.get('can_driver.default_acc', 50)
+        # Log all config values for debugging
+        logger.info("Loaded CAN driver configuration:")
+        logger.info(f"  coupled_axis_mode: {self.coupled_mode}")
+        logger.info(f"  gear_ratios: {self.gear_ratios}")
+        logger.info(f"  encoder_resolution: {self.encoder_resolution}")
+        logger.info(f"  can_interface: {self.can_interface}")
+        logger.info(f"  bitrate: {self.bitrate}")
+        logger.info(f"  default_speed: {self.default_speed}")
+        logger.info(f"  default_acc: {self.default_acc}")
         
         # Communication timeout settings
         self.can_timeout = self.config_manager.get('can_driver.can_timeout', 2.0)

@@ -13,17 +13,17 @@ class XboxController(InputController):
 
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.init()
-        self.global_scale = 10.0  # Scale factor for joint movements
+        self.global_scale = 10  # Scale factor for joint movements
         # Axis mapping:
         # 0 = left stick X, 1 = left stick Y
         # 2 = right stick X, 3 = right stick Y
         # 4 = left trigger, 5 = right trigger
         # Button mapping depends on controller; here we assume Xbox standard
         self.axis_map = {
-            0: (0, 0.5),   # left stick X → joint 0
-            1: (1, -0.5),  # left stick Y → joint 1
-            3: (2, 0.5),   # right stick X → joint 3
-            2: (3, -0.5),  # right stick Y → joint 2
+            0: (0, 0.8),   # left stick X → joint 0
+            1: (1, 3),  # left stick Y → joint 1
+            3: (2, 2),   # right stick X → joint 3
+            2: (3, 2),  # right stick Y → joint 2
         }
 
         self.trigger_map = {
@@ -32,8 +32,8 @@ class XboxController(InputController):
         }
 
         self.button_map = {
-            4: ([5], -0.5),  # left bumper → joints 5+6 CCW
-            5: ([5], 0.5),   # right bumper → joints 5+6 CW
+            4: ([5], -2),  # left bumper → joints 5+6 CCW
+            5: ([5], 2),   # right bumper → joints 5+6 CW
             0: ("gripper", -1.0),  # A → close gripper
             1: ("gripper", 1.0),   # B → open gripper
         }

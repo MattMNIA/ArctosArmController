@@ -7,7 +7,7 @@ servo_0:
   holding: FIFTHTY_PERCENT
   home_direction: CCW
   home_speed: 30
-  homing_offset: 110000
+  homing_offset: 103000
   microsteps: 16
   work_mode: SrvFoc
 servo_1:
