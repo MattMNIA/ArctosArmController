@@ -1,5 +1,5 @@
 import logging
-from typing import Protocol, List, Dict, Any
+from typing import Protocol, List, Dict, Any, Optional
 import platform
 import time
 import concurrent.futures
@@ -62,6 +62,8 @@ class CanDriver():
         self.motion_service = None
         self.limit_hit = False
         self.previous_limits = [[False, False] for _ in range(6)]
+        self.current_limits = [[False, False] for _ in range(6)]  # Current endstop status
+        self.velocity_direction = [None] * 6  # type: List[Optional[str]]  # Track velocity direction for each motor
         
         # Add locks for thread safety
         self._servo_lock = threading.RLock()  # Reentrant lock for servo operations
@@ -78,6 +80,102 @@ class CanDriver():
             'home_speed': 50,
             'endstop_level': 'Low'
         })
+
+    def is_movement_allowed(self, motor_id: int, direction: str) -> bool:
+        """
+        Check if movement in given direction is allowed for motor, considering coupled constraints.
+        
+        For coupled motors 4 and 5:
+        - When motor 4 (5) hits Low endstop, motor 5 (4) cannot move CCW
+        - When motor 4 (5) hits High endstop, motor 5 (4) cannot move CW
+        
+        Args:
+            motor_id: Motor ID (0-5)
+            direction: 'CW' or 'CCW'
+            
+        Returns:
+            True if movement is allowed, False otherwise
+        """
+        if motor_id not in [4, 5]:
+            return True  # No coupling constraints for other motors
+        
+        # Determine coupled motor
+        coupled_motor = 5 if motor_id == 4 else 4
+        
+        # Endstop mapping is different for each motor
+        if coupled_motor == 4:  # Motor 5
+            low_endstop_hit = self.current_limits[coupled_motor][1]   # Low endstop
+            high_endstop_hit = self.current_limits[coupled_motor][0]  # High endstop
+        else:  # coupled_motor == 5, Motor 6
+            low_endstop_hit = self.current_limits[coupled_motor][0]   # Low endstop (opposite)
+            high_endstop_hit = self.current_limits[coupled_motor][1]  # High endstop (opposite)
+        
+        if direction == 'CCW' and low_endstop_hit:
+            return False  # Coupled motor's low endstop hit, cannot move CCW
+        elif direction == 'CW' and high_endstop_hit:
+            return False  # Coupled motor's high endstop hit, cannot move CW
+        
+        return True
+
+    def check_and_enforce_coupled_limits(self) -> None:
+        """
+        Check for newly hit coupled endstops and stop affected motors to enforce coupling constraints.
+        
+        When a motor hits an endstop, the coupled motor must also be prevented from moving
+        in the corresponding direction.
+        """
+        for motor_id in [4, 5]:
+            coupled_motor = 5 if motor_id == 4 else 4
+            
+            # Get the correct endstop indices for this motor
+            if motor_id == 4:  # Motor 5
+                low_idx, high_idx = 1, 0
+            else:  # motor_id == 5, Motor 6
+                low_idx, high_idx = 0, 1
+            
+            # Check if low endstop was newly hit
+            if (self.current_limits[motor_id][low_idx] and 
+                not self.previous_limits[motor_id][low_idx]):
+                # Low endstop newly hit on motor_id, stop coupled_motor from moving CCW
+                logger.warning(f"Motor {motor_id} low endstop hit, stopping motor {coupled_motor} CCW movement")
+                self._stop_motor_if_moving_direction(coupled_motor, 'CCW')
+            
+            # Check if high endstop was newly hit
+            if (self.current_limits[motor_id][high_idx] and 
+                not self.previous_limits[motor_id][high_idx]):
+                # High endstop newly hit on motor_id, stop coupled_motor from moving CW
+                logger.warning(f"Motor {motor_id} high endstop hit, stopping motor {coupled_motor} CW movement")
+                self._stop_motor_if_moving_direction(coupled_motor, 'CW')
+        
+        # Update previous limits for next check
+        self.previous_limits = [limit[:] for limit in self.current_limits]
+
+    def _stop_motor_if_moving_direction(self, motor_id: int, direction: str) -> None:
+        """
+        Stop a motor if it's currently moving in the specified direction.
+        
+        Args:
+            motor_id: Motor ID (0-5)
+            direction: 'CW' or 'CCW'
+        """
+        if motor_id >= len(self.servos) or self.servos[motor_id] is None:
+            return
+        
+        try:
+            # Check if motor is in velocity mode and moving in the forbidden direction
+            if (self.velocity_active[motor_id] and 
+                self.velocity_direction[motor_id] == direction):
+                logger.info(f"Stopping motor {motor_id} velocity control in {direction} direction")
+                self.servos[motor_id].stop_motor_in_speed_mode(255)
+                self.velocity_active[motor_id] = False
+                self.velocity_direction[motor_id] = None
+            
+            # Also check if motor is running absolute motion (harder to stop mid-motion)
+            # For now, we'll rely on the hardware endstops and velocity prevention
+            # If needed, we could add emergency stop here, but that might be too aggressive
+            
+        except Exception as e:
+            logger.error(f"Error stopping motor {motor_id}: {e}")
 
     def joints_to_motors(self, joint_angles: List[float]) -> Dict[int, float]:
         """
@@ -828,6 +926,24 @@ class CanDriver():
                         logger.error(f"Servo index {motor_id} out of range")
                         return False
                     
+                    # Get current position to determine movement direction
+                    current_encoder = self._read_encoder_with_fallback(motor_id, self.servos[motor_id])
+                    if current_encoder is None:
+                        logger.warning(f"Could not read current position for motor {motor_id}, skipping movement check")
+                    else:
+                        # Determine direction
+                        if encoder_val > current_encoder:
+                            direction = 'CW'
+                        elif encoder_val < current_encoder:
+                            direction = 'CCW'
+                        else:
+                            direction = None  # No movement
+                        
+                        # Check if movement is allowed
+                        if direction and not self.is_movement_allowed(motor_id, direction):
+                            logger.warning(f"Absolute movement not allowed for motor {motor_id} in direction {direction} due to coupled endstop constraint")
+                            return False
+                    
                     # Get motor-specific speed and acceleration
                     motor_config = self.get_motor_config(motor_id)
                     speed = motor_config['speed_rpm']
@@ -1073,6 +1189,12 @@ class CanDriver():
                     logger.warning(f"Error reading shaft angle error for servo {i}: {e}")
                     error.append(0)
 
+        # Update current limits for movement validation
+        self.current_limits = limits
+        
+        # Check and enforce coupled limit constraints
+        self.check_and_enforce_coupled_limits()
+
         return {"q": q, "dq": dq, "error": error, "limits": limits, "motor_encoders": motor_encoders}
 
     def estop(self) -> None:
@@ -1097,6 +1219,7 @@ class CanDriver():
                     logger.error(f"Failed to send emergency stop to servo {i+1}: {e}")
         
         self.velocity_active = [False] * 6
+        self.velocity_direction = [None] * 6
 
     def start_joint_velocity(self, joint_index: int, scale: float) -> None:
         """
@@ -1136,11 +1259,18 @@ class CanDriver():
                     direction = Direction.CW if motor_speed >= 0 else Direction.CCW
                     abs_speed = abs(int(motor_speed))
                     
+                    # Check if movement is allowed considering coupled endstops
+                    direction_str = 'CW' if direction == Direction.CW else 'CCW'
+                    if not self.is_movement_allowed(motor_id, direction_str):
+                        logger.warning(f"Movement not allowed for motor {motor_id} in direction {direction_str} due to coupled endstop constraint")
+                        continue
+                    
                     # Get motor-specific acceleration
                     acc = motor_config['acceleration']
                     
                     self.servos[motor_id].run_motor_in_speed_mode(direction, abs_speed, acc)
                     self.velocity_active[motor_id] = True
+                    self.velocity_direction[motor_id] = direction_str
                     logger.debug(f"Started velocity control for motor {motor_id}: speed={motor_speed} RPM (scale={motor_scale}, max={max_speed})")
                 except Exception as e:
                     logger.error(f"Failed to start velocity control for motor {motor_id}: {e}")
@@ -1168,6 +1298,7 @@ class CanDriver():
                     # Use maximum acceleration for faster stopping
                     self.servos[motor_id].stop_motor_in_speed_mode(255)
                     self.velocity_active[motor_id] = False
+                    self.velocity_direction[motor_id] = None
                     logger.debug(f"Stopped velocity control for motor {motor_id}")
                 except Exception as e:
                     logger.error(f"Failed to stop velocity control for motor {motor_id}: {e}")
