@@ -34,8 +34,8 @@ class XboxController(InputController):
         self.button_map = {
             4: ([5], -1),  # left bumper → joints 5+6 CCW
             5: ([5], 1),   # right bumper → joints 5+6 CW
-            0: ("gripper", -1.0),  # A → close gripper
-            1: ("gripper", 1.0),   # B → open gripper
+            0: ("gripper_close", 1.0),  # A → close gripper
+            1: ("gripper_open", 1.0),   # B → open gripper
         }
         self.last_pressed = set()  # Track previously pressed buttons for transition detection
         self.last_axis_pressed = set()  # Track previously "pressed" axes for transition detection

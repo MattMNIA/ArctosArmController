@@ -42,12 +42,11 @@ def open_gripper():
     except Exception as e:
         logger.error(f"Error parsing JSON for open_gripper: {e}")
         payload = {}
-    force = payload.get('force', 50.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
         return jsonify({"error": "MotionService not running"}), 500
-    motion_service.open_gripper(force)
-    return jsonify({"status": "gripper opened", "force": force})
+    motion_service.open_gripper()
+    return jsonify({"status": "gripper opened"})
 
 @exec_bp.route('/close_gripper', methods=['POST'])
 def close_gripper():
@@ -56,12 +55,11 @@ def close_gripper():
     except Exception as e:
         logger.error(f"Error parsing JSON for close_gripper: {e}")
         payload = {}
-    force = payload.get('force', 50.0)
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
         return jsonify({"error": "MotionService not running"}), 500
-    motion_service.close_gripper(force)
-    return jsonify({"status": "gripper closed", "force": force})
+    motion_service.close_gripper()
+    return jsonify({"status": "gripper closed"})
 
 @exec_bp.route('/set_gripper_position', methods=['POST'])
 def set_gripper_position():
@@ -74,14 +72,13 @@ def set_gripper_position():
     if not payload or 'position' not in payload:
         return jsonify({"error": "Missing 'position' in payload"}), 400
     position = payload['position']
-    force = payload.get('force', 50.0)
     if not isinstance(position, (int, float)):
         return jsonify({"error": "'position' must be a number"}), 400
     motion_service = current_app.config['motion_service']
     if not motion_service.running:
         return jsonify({"error": "MotionService not running"}), 500
-    motion_service.set_gripper_position(position, force)
-    return jsonify({"status": f"gripper set to {position}", "force": force})
+    motion_service.set_gripper_position(position)
+    return jsonify({"status": f"gripper set to {position}"})
 
 
 @exec_bp.route('/home_joints', methods=['POST'])

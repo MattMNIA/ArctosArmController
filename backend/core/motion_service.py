@@ -35,10 +35,10 @@ class JointCommand(Command):
 
 class GripperCommand(Command):
     """Command for gripper actions."""
-    def __init__(self, action: str, position: Optional[float] = None, force: float = 50.0):
+    def __init__(self, action: str, position: Optional[float] = None, delay: float = 0.5):
         self.action = action
         self.position = position
-        self.force = force
+        self.delay = delay
 
     def execute(self, driver) -> None:
         if self.action == 'open':
@@ -51,8 +51,8 @@ class GripperCommand(Command):
 
     def get_description(self) -> str:
         if self.action == 'set':
-            return f"Gripper set: position={self.position}, force={self.force}"
-        return f"Gripper {self.action}: force={self.force}"
+            return f"Gripper set: position={self.position}, delay={self.delay:.2f}s"
+        return f"Gripper {self.action}, delay={self.delay:.2f}s"
 
 class HomeCommand(Command):
     """Command for homing specific joints."""
@@ -73,7 +73,7 @@ class MotionService:
     """
     def __init__(self, driver=None, loop_hz: int = 50):
         self.driver = driver or SimDriver()
-        self.loop_hz = loop_hz
+        self.loop_hz = loop_hz  # Increased from 50 to 100 Hz for smoother motion
         self.command_queue: "queue.Queue[Command]" = queue.Queue()
         self.running = False
         self.thread: Optional[threading.Thread] = None
@@ -88,6 +88,7 @@ class MotionService:
         self._paused = False  # Flag to freeze execution on limit hit
         self._current_command: Optional[Command] = None
         self._command_start_time = 0.0
+        self._current_gripper_position = 0.0  # Track gripper position (0.0-1.0 range)
 
     @property
     def current_state(self):
@@ -175,6 +176,25 @@ class MotionService:
                 break
         logger.info(f"Command queue cleared. Removed {cleared_count} commands due to limit hit.")
 
+    def _cancel_pending_gripper_commands(self):
+        """Remove any pending gripper commands from the queue."""
+        # Create a new queue with non-gripper commands
+        new_queue = queue.Queue()
+        cancelled_count = 0
+        while not self.command_queue.empty():
+            try:
+                cmd = self.command_queue.get_nowait()
+                if isinstance(cmd, GripperCommand):
+                    cancelled_count += 1
+                    logger.info(f"Cancelled pending gripper command: {cmd.get_description()}")
+                else:
+                    new_queue.put(cmd)
+            except queue.Empty:
+                break
+        self.command_queue = new_queue
+        if cancelled_count > 0:
+            logger.info(f"Cancelled {cancelled_count} pending gripper commands")
+
     def _loop(self):
         """Main execution loop."""
         dt = 1.0 / self.loop_hz
@@ -231,11 +251,8 @@ class MotionService:
             cmd.execute(self.driver)
             
             if isinstance(cmd, (GripperCommand, HomeCommand)):
-                # Gripper and home commands are instant, mark as done
-                with self._command_lock:
-                    self._current_command = None
-                self.current_state = "IDLE"
-                logger.info("Command execution complete")
+                # Gripper and home commands have a 0.5 second delay to prevent overwhelming the servo
+                pass  # Don't mark as complete immediately
                 
         except Exception as e:
             logger.error(f"Error executing command {cmd.get_description()}: {e}")
@@ -246,14 +263,20 @@ class MotionService:
     def _check_command_completion(self):
         """Check if the current command has completed."""
         with self._command_lock:
-            if (self._current_command is not None and 
-                isinstance(self._current_command, JointCommand)):
-                
+            if self._current_command is not None:
                 elapsed = time.time() - self._command_start_time
-                if elapsed >= self._current_command.duration_s:
-                    logger.info(f"Joint command execution complete after {elapsed:.2f}s")
-                    self._current_command = None
-                    self.current_state = "IDLE"
+                
+                if isinstance(self._current_command, JointCommand):
+                    if elapsed >= self._current_command.duration_s:
+                        logger.info(f"Joint command execution complete after {elapsed:.2f}s")
+                        self._current_command = None
+                        self.current_state = "IDLE"
+                elif isinstance(self._current_command, (GripperCommand, HomeCommand)):
+                    required_delay = self._current_command.delay if isinstance(self._current_command, GripperCommand) else 1.25
+                    if elapsed >= required_delay:
+                        logger.info(f"Gripper/Home command execution complete after {elapsed:.2f}s")
+                        self._current_command = None
+                        self.current_state = "IDLE"
 
     def _emit_status(self, feedback: Dict[str, Any]):
         """Emit status via WebSocket."""
@@ -302,20 +325,35 @@ class MotionService:
         except Exception as e:
             logger.error(f"Error emitting status: {e}")
 
-    def open_gripper(self, force: float = 50.0):
+    def open_gripper(self):
         """Enqueue a command to open the gripper."""
-        cmd = GripperCommand('open', force=force)
+        self._cancel_pending_gripper_commands()  # Cancel any pending gripper commands
+        target_position = 1.0  # Fully open
+        position_diff = abs(target_position - self._current_gripper_position)
+        delay = max(position_diff * 0.5, 0.2)  # Reduced minimum delay from 0.75s to 0.2s
+        cmd = GripperCommand('open', delay=delay)
         self.enqueue(cmd)
+        self._current_gripper_position = target_position
 
-    def close_gripper(self, force: float = 50.0):
+    def close_gripper(self):
         """Enqueue a command to close the gripper."""
-        cmd = GripperCommand('close', force=force)
+        self._cancel_pending_gripper_commands()  # Cancel any pending gripper commands
+        target_position = 0.0  # Fully closed
+        position_diff = abs(target_position - self._current_gripper_position)
+        delay = max(position_diff * 0.5, 0.2)  # Reduced minimum delay from 0.75s to 0.2s
+        cmd = GripperCommand('close', delay=delay)
         self.enqueue(cmd)
+        self._current_gripper_position = target_position
 
-    def set_gripper_position(self, position: float, force: float = 50.0):
+    def set_gripper_position(self, position: float):
         """Enqueue a command to set the gripper position."""
-        cmd = GripperCommand('set', position, force=force)
+        self._cancel_pending_gripper_commands()  # Cancel any pending gripper commands
+        target_position = max(0.0, min(1.0, position))  # Clamp to 0.0-1.0
+        position_diff = abs(target_position - self._current_gripper_position)
+        delay = max(position_diff * 0.3, 0.05)  # Reduced minimum delay from 0.1s to 0.05s for smoother incremental control
+        cmd = GripperCommand('set', position=target_position, delay=delay)
         self.enqueue(cmd)
+        self._current_gripper_position = target_position
 
 
     def send_joint_targets(self, q: List[float], duration_s: float = 1.0):

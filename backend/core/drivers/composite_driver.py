@@ -39,30 +39,30 @@ class CompositeDriver:
         for thread in threads:
             thread.join()
 
-    def open_gripper(self, force: float = 50.0) -> None:
+    def open_gripper(self) -> None:
         threads = []
         for d in self.drivers:
-            thread = threading.Thread(target=d.open_gripper, args=(force,))
+            thread = threading.Thread(target=d.open_gripper)
             threads.append(thread)
             thread.start()
         
         for thread in threads:
             thread.join()
 
-    def close_gripper(self, force: float = 50.0) -> None:
+    def close_gripper(self) -> None:
         threads = []
         for d in self.drivers:
-            thread = threading.Thread(target=d.close_gripper, args=(force,))
+            thread = threading.Thread(target=d.close_gripper)
             threads.append(thread)
             thread.start()
         
         for thread in threads:
             thread.join()
 
-    def set_gripper_position(self, position: float, force: float = 50.0) -> None:
+    def set_gripper_position(self, position: float) -> None:
         threads = []
         for d in self.drivers:
-            thread = threading.Thread(target=d.set_gripper_position, args=(position, force))
+            thread = threading.Thread(target=d.set_gripper_position, args=(position,))
             threads.append(thread)
             thread.start()
         

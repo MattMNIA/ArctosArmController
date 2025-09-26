@@ -4,8 +4,9 @@ class DriverProtocol(Protocol):
     """Protocol defining the driver interface for teleoperation."""
     def get_feedback(self) -> Dict[str, Any]: ...
     def send_joint_targets(self, q: List[float], t_s: float) -> None: ...
-    def open_gripper(self, force: float = 50.0) -> None: ...
-    def close_gripper(self, force: float = 50.0) -> None: ...
+    def open_gripper(self) -> None: ...
+    def close_gripper(self) -> None: ...
+    def set_gripper_position(self, position: float) -> None: ...
     def start_joint_velocity(self, joint_index: int, scale: float) -> None: ...
     def stop_joint_velocity(self, joint_index: int) -> None: ...
 
@@ -19,40 +20,86 @@ class TeleopController:
     This provides an alternative to the queued motion service for real-time control.
     """
 
-    def __init__(self, input_controller: InputController, driver: DriverProtocol):
+    def __init__(self, input_controller: InputController, driver: DriverProtocol, motion_service=None):
         self.input_controller = input_controller
         self.driver = driver
+        self.motion_service = motion_service
         self.active_movements: Dict[Any, float] = {}
-        self.teleop_hz = 50  # Control loop frequency
+        self.teleop_hz = 100  # Control loop frequency - increased for smoother motion
+        self.gripper_position = 0.5  # Start at middle position (0.0 = closed, 1.0 = open)
+        self.gripper_increment = 0.01  # How much to change position per step - reduced for finer control
+        self.gripper_direction = 0  # 1 for opening, -1 for closing, 0 for stopped
+        self.last_gripper_update = 0  # Track time of last gripper update
+        self.velocity_ramp_rate = 0.1  # How quickly velocity changes (0.1 = 10% per frame)
+        self.target_velocities: Dict[int, float] = {}  # Target velocities for smooth ramping
 
     def teleop_step(self):
         """
         Process teleoperation input and control joints with velocity.
         Called repeatedly in the main control loop.
         """
+        import time
+        
         # Get events to start/stop velocities
         events = self.input_controller.get_events()
         for event, joint, scale in events:
             if isinstance(joint, int) and joint < 6:  # joint indices 0-5
                 if event == 'press':
-                    # Pass scale (-1 to 1) directly to driver for motor-specific scaling
-                    self.driver.start_joint_velocity(joint, scale)
-                    self.active_movements[joint] = scale
+                    # Set target velocity for smooth ramping
+                    self.target_velocities[joint] = scale
+                    if joint not in self.active_movements:
+                        self.active_movements[joint] = 0.0  # Start from zero
                 elif event == 'release':
-                    self.driver.stop_joint_velocity(joint)
-                    if joint in self.active_movements:
-                        del self.active_movements[joint]
-            elif joint == "gripper":
+                    # Set target velocity to zero for smooth stop
+                    self.target_velocities[joint] = 0.0
+            elif joint == "gripper_open":
                 if event == 'press':
-                    if scale > 0:
-                        self.driver.open_gripper(force=50.0)
-                    else:
-                        self.driver.close_gripper(force=50.0)
+                    self.gripper_direction = 1  # Start opening
+                elif event == 'release':
+                    self.gripper_direction = 0  # Stop
+            elif joint == "gripper_close":
+                if event == 'press':
+                    self.gripper_direction = -1  # Start closing
+                elif event == 'release':
+                    self.gripper_direction = 0  # Stop
 
-        # Maintain velocities for active movements (needed for PyBullet)
-        for joint, speed in self.active_movements.items():
+        # Handle incremental gripper control
+        current_time = time.time()
+        if self.gripper_direction != 0 and (current_time - self.last_gripper_update) > 0.05:  # Update every 50ms - more frequent
+            self.gripper_position += self.gripper_direction * self.gripper_increment
+            self.gripper_position = max(0.0, min(1.0, self.gripper_position))  # Clamp to 0.0-1.0
+            if self.motion_service:
+                self.motion_service.set_gripper_position(self.gripper_position)
+            else:
+                self.driver.set_gripper_position(self.gripper_position)
+            self.last_gripper_update = current_time
+
+        # Maintain velocities for active movements with smooth ramping (needed for PyBullet)
+        joints_to_remove = []
+        for joint in list(self.active_movements.keys()):
             if isinstance(joint, int):
-                self.driver.start_joint_velocity(joint, speed)
+                current_velocity = self.active_movements[joint]
+                target_velocity = self.target_velocities.get(joint, 0.0)
+                
+                # Ramp velocity towards target
+                if abs(current_velocity - target_velocity) < self.velocity_ramp_rate:
+                    new_velocity = target_velocity
+                else:
+                    direction = 1 if target_velocity > current_velocity else -1
+                    new_velocity = current_velocity + direction * self.velocity_ramp_rate
+                
+                self.active_movements[joint] = new_velocity
+                self.driver.start_joint_velocity(joint, new_velocity)
+                
+                # Remove joints that have ramped to zero
+                if abs(new_velocity) < 0.01 and abs(target_velocity) < 0.01:
+                    self.driver.stop_joint_velocity(joint)
+                    joints_to_remove.append(joint)
+        
+        # Clean up stopped joints
+        for joint in joints_to_remove:
+            del self.active_movements[joint]
+            del self.target_velocities[joint]
 
     def stop_all(self):
         """Stop all active teleoperation movements."""
@@ -60,3 +107,4 @@ class TeleopController:
             if isinstance(joint, int):
                 self.driver.stop_joint_velocity(joint)
         self.active_movements.clear()
+        self.target_velocities.clear()

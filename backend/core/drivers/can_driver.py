@@ -1000,114 +1000,85 @@ class CanDriver():
             
             self.pending_futures = []
 
-    def send_can_message_gripper(self, arbitration_id: int, data: List[int]) -> None:  
+    def send_can_message_gripper(self, arbitration_id: int, data: List[int]) -> None:
         """
         Sends a CAN message to control the gripper.
 
-        This method sends a CAN message with the specified arbitration ID and data to control
-        the gripper. It handles the message sending process and logs the sent message details.
-        It includes a delay of 500 ms after sending the message to allow for processing.
-
         Args:
-            arbitration_id (int): The arbitration ID of the CAN message.
-            data (List[int]): A list of integers representing the data payload of the CAN message.
-
-        Raises:
-            can.CanError: If there is an issue sending the CAN message.
+            arbitration_id (int): The CAN ID for the message (e.g., 0x07).
+            data (List[int]): A list of integers representing the data payload (0-255).
         """
         if self.bus is None:
             logger.warning("CAN bus not initialized. Cannot send gripper command.")
             return
-        
+
         try:
-            msg = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=False)
+            # Ensure data is a bytearray (some backends require this)
+            msg_data = bytearray(data)
+
+            # Construct the CAN message
+            msg = can.Message(
+                arbitration_id=arbitration_id,
+                data=msg_data,
+                is_extended_id=False  # Standard 11-bit ID
+            )
+
+            # Send the message
             self.bus.send(msg)
+            time.sleep(0.01)  # Small delay to ensure message is sent
+            # Log the sent message
             data_bytes = ', '.join([f'0x{byte:02X}' for byte in msg.data])
             logger.debug(f"Sent CAN message: ID=0x{msg.arbitration_id:X}, Data=[{data_bytes}]")
-            time.sleep(0.5)  # Delay of 500 ms to allow for processing
+
         except can.CanError as e:
             logger.error(f"Error sending CAN message: {e}")
 
-    def _set_gripper_current(self, force: float) -> None:
-        """
-        Set the working current for gripper servos based on force parameter.
-        
-        Args:
-            force (float): Force value
-        """
-        if self.bus is None:
-            logger.warning("CAN bus not initialized. Cannot set gripper current.")
-            return
-            
-        try:
-            # Convert force 0.0-1.0
-            # Max current for most MKS servos is 3000 mA
-            current_ma = min(int(force * 3000), 3000)
-            current_ma = max(current_ma, 0)
-            
 
-            try:
-                # Create servo instance for gripper servo
-                gripper_servo = mks_servo.MksServo(self.bus, None, 7)
-                gripper_servo.set_working_current(current_ma)
-                logger.debug(f"Set gripper servo current to {current_ma} mA")
-            except Exception as e:
-                logger.warning(f"Failed to set current for gripper servo: {e}")
-        except Exception as e:
-            logger.error(f"Error setting gripper current: {e}")
 
-    def open_gripper(self, force: float = 50.0) -> None: 
+    def open_gripper(self) -> None: 
         """
-        Opens the gripper with specified force.
-
-        Args:
-            force (float): Force
+        Opens the gripper with default force.
 
         Raises:
             Exception: If there is an issue sending the open gripper command.
 
         """
         try:
-            self._set_gripper_current(force)
             self.send_can_message_gripper(0x07, [0xFF])
-            logger.info(f"Gripper opened with force {force}N.")
+            logger.info("Gripper opened with default force.")
         except Exception as e:
             logger.error(f"Error sending open gripper command: {e}")
+        
 
-    def close_gripper(self, force: float = 50.0) -> None: 
+    def close_gripper(self) -> None: 
         """
-        Closes the gripper with specified force.
-
-        Args:
-            force (float): Force
+        Closes the gripper with default force.
 
         Raises:
             Exception: If there is an issue sending the close gripper command.
 
         """
         try:
-            self._set_gripper_current(force)
             self.send_can_message_gripper(0x07, [0x00])
-            logger.info(f"Gripper closed with force {force}N.")
+            logger.info("Gripper closed with default force.")
+
         except Exception as e:
             logger.error(f"Error sending close gripper command: {e}")
 
-    def set_gripper_position(self, position: float, force: float = 50.0) -> None: 
+    def set_gripper_position(self, position: float) -> None: 
         """
-        Set gripper to specific opening width with specified force.
+        Set gripper to specific opening width with default force.
 
         Args:
             position (float): Position (0.0 = closed, 1.0 = open)
-            force (float): Force
         """
         try:
-            self._set_gripper_current(force)
             # Clamp position to valid range
             clamped_position = max(0.0, min(1.0, position))
             # Map 0.0-1.0 to 0x00-0xFF
             data_value = int(clamped_position * 255)
             self.send_can_message_gripper(0x07, [data_value])
-            logger.info(f"Gripper set to position {clamped_position} with force {force}N.")
+            logger.info(f"Gripper set to position {clamped_position} with default force.")
         except Exception as e:
             logger.error(f"Error sending set gripper position command: {e}")
 

@@ -15,5 +15,6 @@ class SimDriver:
         return {"q": [0,0,0,0,0,0], "dq": [0,0,0,0,0,0], "error": [], "limits": [[False, False] for _ in range(6)]}
     def estop(self): print("SimDriver ESTOP triggered")
     def handle_limits(self, feedback: Dict[str, Any]): print(f"SimDriver handling joint limits: {feedback['limits']}")
-    def close_gripper(self, force: float = 50.0): print("SimDriver gripper closed")
-    def set_gripper_position(self, position: float, force: float = 50.0): print(f"SimDriver gripper set to {position}")
+    def close_gripper(self): print("SimDriver gripper closed")
+    def open_gripper(self): print("SimDriver gripper opened")
+    def set_gripper_position(self, position: float): print(f"SimDriver gripper set to {position}")

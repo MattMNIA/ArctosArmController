@@ -120,7 +120,7 @@ class PyBulletDriver:
         # Step simulation for t_s seconds
         self.step_simulation(t_s)
 
-    def open_gripper(self, force: float = 50.0) -> None:
+    def open_gripper(self) -> None:
         """Open gripper to maximum width (0.015m separation)"""
         left_jaw_idx = 7   # jaw1 - moves in negative Z
         right_jaw_idx = 8  # jaw2 - moves in positive Z
@@ -131,20 +131,20 @@ class PyBulletDriver:
             left_jaw_idx,
             controlMode=p.POSITION_CONTROL,
             targetPosition=0.0,
-            force=force
+            force=50.0
         )
         p.setJointMotorControl2(
             self.robot_id,
             right_jaw_idx,
             controlMode=p.POSITION_CONTROL,
             targetPosition=0.0,
-            force=force
+            force=50.0
         )
         
         # Step simulation to allow movement
         self.step_simulation(0.5)
         
-    def close_gripper(self, force: float = 50.0) -> None:
+    def close_gripper(self) -> None:
         """Close gripper to minimum width (0.0m separation)"""
         left_jaw_idx = 7
         right_jaw_idx = 8
@@ -155,20 +155,20 @@ class PyBulletDriver:
             left_jaw_idx,
             controlMode=p.POSITION_CONTROL,
             targetPosition=0.015,  # URDF limit
-            force=force
+            force=50.0
         )
         p.setJointMotorControl2(
             self.robot_id,
             right_jaw_idx,
             controlMode=p.POSITION_CONTROL,
             targetPosition=0.015,  # URDF limit
-            force=force
+            force=50.0
         )
 
         # Step simulation to allow movement
         self.step_simulation(0.5)
 
-    def set_gripper_position(self, position: float, force: float = 50.0) -> None:
+    def set_gripper_position(self, position: float) -> None:
         """Set gripper to specific opening width (0.0 to 0.015)"""
         left_jaw_idx = 7
         right_jaw_idx = 8
@@ -181,14 +181,14 @@ class PyBulletDriver:
             left_jaw_idx,
             controlMode=p.POSITION_CONTROL,
             targetPosition=clamped_position,
-            force=force
+            force=50.0
         )
         p.setJointMotorControl2(
             self.robot_id,
             right_jaw_idx,
             controlMode=p.POSITION_CONTROL,
             targetPosition=clamped_position,
-            force=force
+            force=50.0
         )
 
         # Step simulation to allow movement

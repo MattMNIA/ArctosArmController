@@ -106,9 +106,10 @@ if __name__ == "__main__":
         else:
             input_controller = KeyboardController()
         
-        # Get the composite driver from the motion service
+        # Get the composite driver and motion service
         comp_driver = app.config['motion_service'].driver
-        teleop_controller = TeleopController(input_controller, comp_driver)
+        motion_service = app.config['motion_service']
+        teleop_controller = TeleopController(input_controller, comp_driver, motion_service)
         
         print("Teleoperation enabled. Use your input device to control the arm. Press Ctrl+C to exit.")
         try:
