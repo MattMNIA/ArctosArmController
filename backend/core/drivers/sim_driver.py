@@ -17,4 +17,3 @@ class SimDriver:
     def handle_limits(self, feedback: Dict[str, Any]): print(f"SimDriver handling joint limits: {feedback['limits']}")
     def close_gripper(self, force: float = 50.0): print("SimDriver gripper closed")
     def set_gripper_position(self, position: float, force: float = 50.0): print(f"SimDriver gripper set to {position}")
-    def grasp_object(self, force: float = 100.0): print(f"SimDriver grasping with force {force}")

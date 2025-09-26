@@ -1111,14 +1111,7 @@ class CanDriver():
         except Exception as e:
             logger.error(f"Error sending set gripper position command: {e}")
 
-    def grasp_object(self, force: float = 100.0) -> None:
-        """
-        Grasp object by closing the gripper with specified force.
-        
-        Args:
-            force (float): Grasping force (higher = stronger grip)
-        """
-        self.close_gripper(force)
+
 
     def get_feedback(self) -> Dict[str, Any]:
         """Get robot feedback with improved error handling."""

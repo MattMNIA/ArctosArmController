@@ -72,19 +72,36 @@ def create_app(drivers_list):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the Arctos Arm Controller")
     parser.add_argument('--drivers', nargs='+', choices=['sim', 'pybullet', 'can'], default=['can'], help="Specify which drivers to use")
-    parser.add_argument('--teleop', choices=['keyboard', 'xbox'], default='xbox', help="Enable teleoperation with specified input device")
+    parser.add_argument('--teleop', choices=['keyboard', 'xbox'], help="Enable teleoperation with specified input device")
     args = parser.parse_args()
+    
+    # Check if Xbox controller is connected
+    xbox_available = False
+    try:
+        import pygame
+        pygame.init()
+        pygame.joystick.init()
+        xbox_available = pygame.joystick.get_count() > 0
+        pygame.quit()
+    except ImportError:
+        pass
+    
+    # Determine teleop mode
+    teleop_mode = args.teleop
+    if teleop_mode is None and xbox_available:
+        teleop_mode = 'xbox'
+    
     app = create_app(args.drivers)
     
-    if args.teleop:
+    if teleop_mode:
         # Start Flask server in a separate thread
         print("Starting Flask server in background...")
         flask_thread = threading.Thread(target=lambda: socketio.run(app, host="0.0.0.0", port=5000, debug=False), daemon=True)
         flask_thread.start()
         
         # Run teleoperation in main thread (required for pygame input handling)
-        print(f"Enabling teleoperation with {args.teleop} input...")
-        if args.teleop == 'xbox':
+        print(f"Enabling teleoperation with {teleop_mode} input...")
+        if teleop_mode == 'xbox':
             input_controller = XboxController()
         else:
             input_controller = KeyboardController()
@@ -103,4 +120,5 @@ if __name__ == "__main__":
             app.config['motion_service'].stop()
     else:
         # Run Flask server normally
-        socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+        print("Starting Flask server without teleoperation...")
+        socketio.run(app, host="0.0.0.0", port=5000, debug=False)

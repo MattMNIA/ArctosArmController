@@ -42,13 +42,12 @@ class GripperCommand(Command):
 
     def execute(self, driver) -> None:
         if self.action == 'open':
-            driver.open_gripper(self.force)
+            driver.open_gripper()
         elif self.action == 'close':
-            driver.close_gripper(self.force)
+            driver.close_gripper()
         elif self.action == 'set' and self.position is not None:
-            driver.set_gripper_position(self.position, self.force)
-        elif self.action == 'grasp':
-            driver.grasp_object(self.force)
+            driver.set_gripper_position(self.position)
+
 
     def get_description(self) -> str:
         if self.action == 'set':
@@ -318,10 +317,6 @@ class MotionService:
         cmd = GripperCommand('set', position, force=force)
         self.enqueue(cmd)
 
-    def grasp_object(self, force: float = 100.0):
-        """Enqueue a command to grasp an object with specified force."""
-        cmd = GripperCommand('grasp', force=force)
-        self.enqueue(cmd)
 
     def send_joint_targets(self, q: List[float], duration_s: float = 1.0):
         """Enqueue a joint movement command."""

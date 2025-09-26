@@ -18,8 +18,8 @@ can_driver:
     home_speed: 30
     endstop_level: High
   - id: 1
-    speed_rpm: 20
-    acceleration: 10
+    speed_rpm: 600
+    acceleration: 50
     homing_offset: -236000
     home_direction: CCW
     home_speed: 60

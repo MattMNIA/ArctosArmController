@@ -68,16 +68,6 @@ class CompositeDriver:
         
         for thread in threads:
             thread.join()
-        
-    def grasp_object(self, force: float = 100.0) -> None:
-        threads = []
-        for d in self.drivers:
-            thread = threading.Thread(target=d.grasp_object, args=(force,))
-            threads.append(thread)
-            thread.start()
-        
-        for thread in threads:
-            thread.join()
 
     def start_joint_velocity(self, joint_index: int, scale: float) -> None:
         threads = []

@@ -83,19 +83,6 @@ def set_gripper_position():
     motion_service.set_gripper_position(position, force)
     return jsonify({"status": f"gripper set to {position}", "force": force})
 
-@exec_bp.route('/grasp_object', methods=['POST'])
-def grasp_object():
-    try:
-        payload = request.get_json(silent=True) or {}
-    except Exception as e:
-        logger.error(f"Error parsing JSON for grasp_object: {e}")
-        payload = {}
-    force = payload.get('force', 100.0)
-    motion_service = current_app.config['motion_service']
-    if not motion_service.running:
-        return jsonify({"error": "MotionService not running"}), 500
-    motion_service.grasp_object(force)
-    return jsonify({"status": "grasping object", "force": force})
 
 @exec_bp.route('/home_joints', methods=['POST'])
 def home_joints():

@@ -194,26 +194,6 @@ class PyBulletDriver:
         # Step simulation to allow movement
         self.step_simulation(0.05)
     
-    def grasp_object(self, force: float = 100.0) -> None:
-        """Close gripper with specified force for grasping"""
-        left_jaw_idx = 7
-        right_jaw_idx = 8
-        
-        p.setJointMotorControl2(
-            self.robot_id, left_jaw_idx,
-            controlMode=p.POSITION_CONTROL,
-            targetPosition=0.0,  # Try to close fully
-            force=force
-        )
-        p.setJointMotorControl2(
-            self.robot_id, right_jaw_idx,
-            controlMode=p.POSITION_CONTROL,
-            targetPosition=0.0,
-            force=force
-        )
-        
-        # Step simulation to allow grasping
-        self.step_simulation(0.05)
         
     def get_feedback(self) -> Dict[str, Any]:
         """Return current joint positions and velocities."""
