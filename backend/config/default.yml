@@ -13,6 +13,7 @@ can_driver:
   - id: 0
     speed_rpm: 1
     acceleration: 50
+    direction: CCW
     homing_offset: -99195
     home_direction: CCW
     home_speed: 30
@@ -21,6 +22,7 @@ can_driver:
   - id: 1
     speed_rpm: 600
     acceleration: 50
+    direction: CCW
     homing_offset: -236000
     home_direction: CCW
     home_speed: 60
@@ -30,6 +32,7 @@ can_driver:
   - id: 2
     speed_rpm: 200
     acceleration: 50
+    direction: CCW
     homing_offset: -238796
     home_direction: CCW
     home_speed: 60
@@ -38,6 +41,7 @@ can_driver:
   - id: 3
     speed_rpm: 200
     acceleration: 50
+    direction: CCW
     homing_offset: 209212
     home_direction: CW
     home_speed: 90
@@ -46,14 +50,16 @@ can_driver:
   - id: 4
     speed_rpm: 500
     acceleration: 40
+    direction: CW
     homing_offset: 116474
-    home_direction: CCW
+    home_direction: CW
     home_speed: 100
     offset_speed: 100
     endstop_level: Low
   - id: 5
     speed_rpm: 500
     acceleration: 40
+    direction: CCW
     homing_offset: -208066
     home_direction: CCW
     home_speed: 100

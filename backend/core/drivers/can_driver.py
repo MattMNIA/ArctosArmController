@@ -71,7 +71,7 @@ class CanDriver():
 
     def get_motor_config(self, motor_id: int) -> dict:
         """Get speed, acceleration, and homing config for a motor."""
-        return self.motor_configs.get(motor_id, {
+        return self.motor_configs.get(motor_id + 1, {
             'speed_rpm': self.default_speed,
             'acceleration': self.default_acc,
             'homing_offset': 0,
@@ -222,6 +222,11 @@ class CanDriver():
                 motor_angles[5] = -q4 + q5  # Motor 5 (changed from q4 - q5)
                 break  # Only need to do this once for both joints
         
+        # Apply direction inversion for joints 1, 2, 4, 5 (motors 1, 2, 4, 5)
+        for motor_id in motor_angles:
+            if motor_id in [1, 2, 4, 5]:
+                motor_angles[motor_id] = -motor_angles[motor_id]
+        
         return motor_angles
 
     def joint_velocity_to_motors(self, joint_index: int, scale: float) -> Dict[int, float]:
@@ -248,12 +253,19 @@ class CanDriver():
         # Coupled mode for joints 4 and 5
         if joint_index == 4:
             # Joint 4: motors opposite directions
-            return {4: scale, 5: -scale}
+            motor_scales = {4: scale, 5: -scale}
         elif joint_index == 5:
             # Joint 5: motors same direction
-            return {4: scale, 5: scale}
+            motor_scales = {4: scale, 5: scale}
+        else:
+            motor_scales = {}
         
-        return {}
+        # Apply direction inversion for joints 1, 2, 4, 5 (motors 1, 2, 4, 5)
+        for motor_id in motor_scales:
+            if motor_id in [1, 2, 4, 5]:
+                motor_scales[motor_id] = -motor_scales[motor_id]
+        
+        return motor_scales
 
     def is_can_interface_up(self) -> bool:
         """
@@ -1069,6 +1081,11 @@ class CanDriver():
                 angle_rad = self.encoder_to_angle(encoder_value, i)
                 motor_angles.append(angle_rad)
             
+            # Apply direction inversion for joints 1, 2, 4, 5 (motors 1, 2, 4, 5)
+            for i in range(len(motor_angles)):
+                if i in [1, 2, 4, 5]:
+                    motor_angles[i] = -motor_angles[i]
+            
             # Convert motor angles to joint angles for coupled mode
             coupled_mode = self.config_manager.get('joints.coupled_mode', False)
             if coupled_mode and len(motor_angles) >= 6:
@@ -1088,6 +1105,8 @@ class CanDriver():
             for i, servo in enumerate(self.servos):
                 try:
                     speed = servo.read_motor_speed()
+                    if speed is not None and i in [1, 2, 4, 5]:
+                        speed = -speed
                     dq.append(speed if speed is not None else 0.0)
                 except Exception as e:
                     logger.warning(f"Error reading speed for servo {i}: {e}")

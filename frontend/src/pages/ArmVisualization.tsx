@@ -1,5 +1,5 @@
 import React, { Suspense, useEffect, useState, useRef } from "react";
-import { Canvas, useLoader } from "@react-three/fiber";
+import { Canvas, useLoader, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import URDFLoader from "urdf-loader";
 import * as THREE from "three";
@@ -31,23 +31,40 @@ const URDFModel: React.FC<URDFProps> = ({ path, jointAngles }) => {
     }
   );
 
-  // Apply joint angles when they change
+  const [currentAngles, setCurrentAngles] = useState(jointAngles);
+  const [targetAngles, setTargetAngles] = useState(jointAngles);
+
+  // Update target angles when jointAngles prop changes
+  useEffect(() => {
+    setTargetAngles(jointAngles);
+  }, [jointAngles]);
+
+  // Smooth interpolation using useFrame
+  useFrame(() => {
+    setCurrentAngles(prev =>
+      prev.map((current, i) =>
+        THREE.MathUtils.lerp(current, targetAngles[i], 0.05) // Adjust 0.05 for smoothing speed
+      )
+    );
+  });
+
+  // Apply current joint angles when they change
   React.useEffect(() => {
-    if (urdf && jointAngles.length >= 6) {
+    if (urdf && currentAngles.length >= 6) {
       try {
         // Set joint values for the 6 revolute joints
         const jointNames = ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6'];
 
         jointNames.forEach((jointName, index) => {
           if (urdf.joints && urdf.joints[jointName]) {
-            urdf.joints[jointName].setJointValue(jointAngles[index] || 0);
+            urdf.joints[jointName].setJointValue(currentAngles[index] || 0);
           }
         });
       } catch (error) {
         console.error('Error setting joint values:', error);
       }
     }
-  }, [urdf, jointAngles]);
+  }, [urdf, currentAngles]);
 
 if (!urdf) return null;
 
