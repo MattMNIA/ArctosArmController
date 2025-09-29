@@ -99,3 +99,12 @@ class CompositeDriver:
     def handle_limits(self, feedback):
         # Aggregate limit handling from all drivers
         return any(d.handle_limits(feedback) for d in self.drivers)
+
+    def reload_config(self) -> None:
+        """Reload configuration for all drivers that support it."""
+        for d in self.drivers:
+            if hasattr(d, 'reload_config'):
+                try:
+                    d.reload_config()
+                except Exception as e:
+                    print(f"Failed to reload config for {d.__class__.__name__}: {e}")

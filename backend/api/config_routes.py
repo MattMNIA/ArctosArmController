@@ -31,14 +31,15 @@ def update_config():
         config_manager.save_config()
 
         # Notify motion service to reload config if running
-        motion_service = current_app.config.get('motion_service')
+        motion_service = current_app.config['motion_service']
         if motion_service and hasattr(motion_service.driver, 'reload_config'):
             try:
                 motion_service.driver.reload_config()
                 logger.info("Driver config reloaded")
             except Exception as e:
                 logger.warning(f"Failed to reload driver config: {e}")
-
+        else:
+            logger.info("Motion service not running or driver does not support config reload")
         return jsonify({"message": "Configuration updated successfully"})
     except Exception as e:
         logger.error(f"Failed to update config: {e}")
@@ -77,13 +78,15 @@ def update_motor_config(motor_id):
         config_manager.save_config()
 
         # Notify motion service to reload config if running
-        motion_service = current_app.config.get('motion_service')
+        motion_service = current_app.config['motion_service']
         if motion_service and hasattr(motion_service.driver, 'reload_config'):
             try:
                 motion_service.driver.reload_config()
                 logger.info("Driver config reloaded")
             except Exception as e:
                 logger.warning(f"Failed to reload driver config: {e}")
+        else:
+            logger.info("Motion service not running or driver does not support config reload")
 
         return jsonify({"message": f"Motor {motor_id} configuration updated successfully"})
     except Exception as e:

@@ -1291,6 +1291,9 @@ class CanDriver():
     def reload_config(self) -> None:
         """Reload configuration from file."""
         try:
+            # Reload the config manager's config from disk
+            self.config_manager.config = self.config_manager.load_config()
+            
             # Reload motor configurations
             motor_configs = self.config_manager.get('can_driver.motors', [])
             self.motor_configs = {}

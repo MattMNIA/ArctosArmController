@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { RotateCcw, Settings } from 'lucide-react';
+import { RotateCcw, Settings, Save } from 'lucide-react';
 
 interface MotorConfig {
   id: number;
@@ -11,6 +11,7 @@ interface MotorConfig {
 
 export default function MotorConfig() {
   const [motors, setMotors] = useState<MotorConfig[]>([]);
+  const [originalMotors, setOriginalMotors] = useState<MotorConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export default function MotorConfig() {
       if (!response.ok) throw new Error('Failed to fetch motor configurations');
       const data = await response.json();
       setMotors(data);
+      setOriginalMotors(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load configurations');
     } finally {
@@ -36,10 +38,6 @@ export default function MotorConfig() {
 
   const updateMotor = async (motorId: number, field: keyof MotorConfig, value: number) => {
     try {
-      setSaving(true);
-      setError(null);
-      setSuccess(null);
-
       const response = await fetch(`/api/config/motors/${motorId}`, {
         method: 'PUT',
         headers: {
@@ -52,14 +50,42 @@ export default function MotorConfig() {
 
       if (!response.ok) throw new Error('Failed to update motor configuration');
 
-      // Update local state
-      setMotors(prev => prev.map(motor =>
+      // Update original state
+      setOriginalMotors(prev => prev.map(motor =>
         motor.id === motorId ? { ...motor, [field]: value } : motor
       ));
-
-      setSuccess(`Motor ${motorId + 1} ${field} updated successfully`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update configuration');
+      throw err;
+    }
+  };
+
+  const saveChanges = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+
+      const promises: Promise<void>[] = [];
+      motors.forEach(motor => {
+        const original = originalMotors.find(o => o.id === motor.id);
+        if (original) {
+          if (motor.speed_rpm !== original.speed_rpm) {
+            promises.push(updateMotor(motor.id, 'speed_rpm', motor.speed_rpm));
+          }
+          if (motor.acceleration !== original.acceleration) {
+            promises.push(updateMotor(motor.id, 'acceleration', motor.acceleration));
+          }
+          if (motor.homing_offset !== original.homing_offset) {
+            promises.push(updateMotor(motor.id, 'homing_offset', motor.homing_offset));
+          }
+        }
+      });
+
+      await Promise.all(promises);
+
+      setSuccess('All changes saved successfully');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save configurations');
     } finally {
       setSaving(false);
     }
@@ -76,7 +102,17 @@ export default function MotorConfig() {
       { id: 5, speed_rpm: 500, acceleration: 40, homing_offset: 20000 },
     ];
     setMotors(defaultMotors);
+    setOriginalMotors(defaultMotors);
   };
+
+  const hasChanges = motors.some(motor => {
+    const original = originalMotors.find(o => o.id === motor.id);
+    return original && (
+      motor.speed_rpm !== original.speed_rpm ||
+      motor.acceleration !== original.acceleration ||
+      motor.homing_offset !== original.homing_offset
+    );
+  });
 
   if (loading) {
     return (
@@ -150,7 +186,6 @@ export default function MotorConfig() {
                       m.id === motor.id ? { ...m, speed_rpm: value } : m
                     ));
                   }}
-                  onBlur={() => updateMotor(motor.id, 'speed_rpm', motor.speed_rpm)}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"
                   max="1000"
@@ -171,7 +206,6 @@ export default function MotorConfig() {
                       m.id === motor.id ? { ...m, acceleration: value } : m
                     ));
                   }}
-                  onBlur={() => updateMotor(motor.id, 'acceleration', motor.acceleration)}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"
                   max="1000"
@@ -192,7 +226,6 @@ export default function MotorConfig() {
                       m.id === motor.id ? { ...m, homing_offset: value } : m
                     ));
                   }}
-                  onBlur={() => updateMotor(motor.id, 'homing_offset', motor.homing_offset)}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -201,7 +234,17 @@ export default function MotorConfig() {
         ))}
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-4">
+        <motion.button
+          onClick={saveChanges}
+          disabled={!hasChanges || saving}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white rounded-lg transition-colors duration-200"
+        >
+          <Save className="w-5 h-5" />
+          Save Changes
+        </motion.button>
         <motion.button
           onClick={resetToDefaults}
           whileHover={{ scale: 1.05 }}

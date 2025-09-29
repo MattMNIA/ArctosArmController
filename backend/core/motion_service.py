@@ -73,7 +73,7 @@ class MotionService:
     """
     def __init__(self, driver=None, loop_hz: int = 50):
         self.driver = driver or SimDriver()
-        self.loop_hz = loop_hz  # Increased from 50 to 100 Hz for smoother motion
+        self.loop_hz = loop_hz  
         self.command_queue: "queue.Queue[Command]" = queue.Queue()
         self.running = False
         self.thread: Optional[threading.Thread] = None

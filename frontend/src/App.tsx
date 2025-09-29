@@ -11,7 +11,7 @@ import ArmVisualization from './pages/ArmVisualization';
 import MotorConfig from './pages/MotorConfig';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('visualization');
+  const [currentPage, setCurrentPage] = useState('config');
 
   const renderPage = () => {
     switch (currentPage) {
