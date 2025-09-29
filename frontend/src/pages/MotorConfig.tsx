@@ -7,6 +7,10 @@ interface MotorConfig {
   speed_rpm: number;
   acceleration: number;
   homing_offset: number;
+  home_direction: string;
+  home_speed: number;
+  offset_speed: number;
+  endstop_level: string;
 }
 
 export default function MotorConfig() {
@@ -36,7 +40,7 @@ export default function MotorConfig() {
     }
   };
 
-  const updateMotor = async (motorId: number, field: keyof MotorConfig, value: number) => {
+  const updateMotor = async (motorId: number, field: keyof MotorConfig, value: number | string) => {
     try {
       const response = await fetch(`/api/config/motors/${motorId}`, {
         method: 'PUT',
@@ -78,6 +82,18 @@ export default function MotorConfig() {
           if (motor.homing_offset !== original.homing_offset) {
             promises.push(updateMotor(motor.id, 'homing_offset', motor.homing_offset));
           }
+          if (motor.home_direction !== original.home_direction) {
+            promises.push(updateMotor(motor.id, 'home_direction', motor.home_direction));
+          }
+          if (motor.home_speed !== original.home_speed) {
+            promises.push(updateMotor(motor.id, 'home_speed', motor.home_speed));
+          }
+          if (motor.offset_speed !== original.offset_speed) {
+            promises.push(updateMotor(motor.id, 'offset_speed', motor.offset_speed));
+          }
+          if (motor.endstop_level !== original.endstop_level) {
+            promises.push(updateMotor(motor.id, 'endstop_level', motor.endstop_level));
+          }
         }
       });
 
@@ -94,12 +110,12 @@ export default function MotorConfig() {
   const resetToDefaults = () => {
     // Reset to default values (you might want to fetch these from the server)
     const defaultMotors: MotorConfig[] = [
-      { id: 0, speed_rpm: 200, acceleration: 50, homing_offset: 103000 },
-      { id: 1, speed_rpm: 20, acceleration: 10, homing_offset: 236000 },
-      { id: 2, speed_rpm: 200, acceleration: 50, homing_offset: 238796 },
-      { id: 3, speed_rpm: 200, acceleration: 50, homing_offset: 203333 },
-      { id: 4, speed_rpm: 500, acceleration: 40, homing_offset: 25000 },
-      { id: 5, speed_rpm: 500, acceleration: 40, homing_offset: 20000 },
+      { id: 0, speed_rpm: 200, acceleration: 50, homing_offset: 103000, home_direction: 'CCW', home_speed: 50, offset_speed: 100, endstop_level: 'Low' },
+      { id: 1, speed_rpm: 20, acceleration: 10, homing_offset: 236000, home_direction: 'CCW', home_speed: 50, offset_speed: 100, endstop_level: 'Low' },
+      { id: 2, speed_rpm: 200, acceleration: 50, homing_offset: 238796, home_direction: 'CCW', home_speed: 50, offset_speed: 100, endstop_level: 'Low' },
+      { id: 3, speed_rpm: 200, acceleration: 50, homing_offset: 203333, home_direction: 'CCW', home_speed: 50, offset_speed: 100, endstop_level: 'Low' },
+      { id: 4, speed_rpm: 500, acceleration: 40, homing_offset: 25000, home_direction: 'CCW', home_speed: 50, offset_speed: 100, endstop_level: 'Low' },
+      { id: 5, speed_rpm: 500, acceleration: 40, homing_offset: 20000, home_direction: 'CCW', home_speed: 50, offset_speed: 100, endstop_level: 'Low' },
     ];
     setMotors(defaultMotors);
     setOriginalMotors(defaultMotors);
@@ -110,7 +126,11 @@ export default function MotorConfig() {
     return original && (
       motor.speed_rpm !== original.speed_rpm ||
       motor.acceleration !== original.acceleration ||
-      motor.homing_offset !== original.homing_offset
+      motor.homing_offset !== original.homing_offset ||
+      motor.home_direction !== original.home_direction ||
+      motor.home_speed !== original.home_speed ||
+      motor.offset_speed !== original.offset_speed ||
+      motor.endstop_level !== original.endstop_level
     );
   });
 
@@ -228,6 +248,84 @@ export default function MotorConfig() {
                   }}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+              </div>
+
+              {/* Home Direction */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Home Direction
+                </label>
+                <select
+                  value={motor.home_direction}
+                  onChange={(e) => {
+                    setMotors(prev => prev.map(m =>
+                      m.id === motor.id ? { ...m, home_direction: e.target.value } : m
+                    ));
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="CW">CW</option>
+                  <option value="CCW">CCW</option>
+                </select>
+              </div>
+
+              {/* Home Speed */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Home Speed
+                </label>
+                <input
+                  type="number"
+                  value={motor.home_speed}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value) || 0;
+                    setMotors(prev => prev.map(m =>
+                      m.id === motor.id ? { ...m, home_speed: value } : m
+                    ));
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  min="1"
+                  max="1000"
+                />
+              </div>
+
+              {/* Offset Speed */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Offset Speed
+                </label>
+                <input
+                  type="number"
+                  value={motor.offset_speed}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value) || 0;
+                    setMotors(prev => prev.map(m =>
+                      m.id === motor.id ? { ...m, offset_speed: value } : m
+                    ));
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  min="1"
+                  max="1000"
+                />
+              </div>
+
+              {/* Endstop Level */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Endstop Level
+                </label>
+                <select
+                  value={motor.endstop_level}
+                  onChange={(e) => {
+                    setMotors(prev => prev.map(m =>
+                      m.id === motor.id ? { ...m, endstop_level: e.target.value } : m
+                    ));
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Low">Low</option>
+                  <option value="High">High</option>
+                </select>
               </div>
             </div>
           </motion.div>

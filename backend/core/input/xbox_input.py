@@ -39,7 +39,7 @@ class XboxController(InputController):
         }
         self.last_pressed = set()  # Track previously pressed buttons for transition detection
         self.last_axis_pressed = set()  # Track previously "pressed" axes for transition detection
-        self.axis_threshold = 0.15  # Deadzone radius around center position
+        self.axis_threshold = 0.25  # Deadzone radius around center position
         
         # Calibrate center positions for each axis to handle stick drift
         self.axis_centers = {}
@@ -58,7 +58,7 @@ class XboxController(InputController):
             for axis in range(self.joystick.get_numaxes()):
                 sample[axis] = self.joystick.get_axis(axis)
             samples.append(sample)
-            time.sleep(0.1)
+            time.sleep(0.05)
         
         # Calculate average center position for each axis
         for axis in range(self.joystick.get_numaxes()):
