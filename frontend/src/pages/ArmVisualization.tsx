@@ -8,6 +8,7 @@ import io, { Socket } from 'socket.io-client';
 interface URDFProps {
   path: string;
   jointAngles: number[];
+  gripperPosition?: number;
 }
 
 interface TelemetryData {
@@ -15,9 +16,10 @@ interface TelemetryData {
   q: number[];
   error: number[];
   limits: any[];
+  gripper_position?: number;
 }
 
-const URDFModel: React.FC<URDFProps> = ({ path, jointAngles }) => {
+const URDFModel: React.FC<URDFProps> = ({ path, jointAngles, gripperPosition = 0 }) => {
   const urdf = useLoader(
     URDFLoader as any,
     path,
@@ -60,11 +62,20 @@ const URDFModel: React.FC<URDFProps> = ({ path, jointAngles }) => {
             urdf.joints[jointName].setJointValue(currentAngles[index] || 0);
           }
         });
+
+        // Set gripper jaw positions based on gripper position (0.0 = open, 1.0 = closed)
+        const jawPosition = (1 - gripperPosition) * 0.015; // URDF limit is 0.015
+        if (urdf.joints && urdf.joints['jaw1']) {
+          urdf.joints['jaw1'].setJointValue(jawPosition);
+        }
+        if (urdf.joints && urdf.joints['jaw2']) {
+          urdf.joints['jaw2'].setJointValue(jawPosition);
+        }
       } catch (error) {
         console.error('Error setting joint values:', error);
       }
     }
-  }, [urdf, currentAngles]);
+  }, [urdf, currentAngles, gripperPosition]);
 
 if (!urdf) return null;
 
@@ -172,7 +183,7 @@ const RoboticArmViewer: React.FC = () => {
           position={[0, 0.001, 0]} // slight offset to prevent z-fighting
         />
         <Suspense fallback={null}>
-          <URDFModel path="/models/urdf/arctos_urdf.urdf" jointAngles={jointAngles} />
+          <URDFModel path="/models/urdf/arctos_urdf.urdf" jointAngles={jointAngles} gripperPosition={telemetry?.gripper_position} />
         </Suspense>
         <OrbitControls />
       </Canvas>

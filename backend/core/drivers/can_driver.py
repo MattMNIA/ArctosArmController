@@ -71,7 +71,7 @@ class CanDriver():
 
     def get_motor_config(self, motor_id: int) -> dict:
         """Get speed, acceleration, and homing config for a motor."""
-        return self.motor_configs.get(motor_id + 1, {
+        return self.motor_configs.get(motor_id, {
             'speed_rpm': self.default_speed,
             'acceleration': self.default_acc,
             'homing_offset': 0,

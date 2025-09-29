@@ -317,7 +317,8 @@ class MotionService:
                 "q": joint_angles,
                 "encoders": encoders,
                 "error": feedback.get("error", []),
-                "limits": feedback.get("limits", [])
+                "limits": feedback.get("limits", []),
+                "gripper_position": self._current_gripper_position
             }
             
             if self.ws_emit and (self.has_active_connections is None or self.has_active_connections()):

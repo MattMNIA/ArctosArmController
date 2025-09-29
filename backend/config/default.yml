@@ -50,18 +50,18 @@ can_driver:
   - id: 4
     speed_rpm: 500
     acceleration: 40
-    direction: CW
+    direction: CCW
     homing_offset: 116474
-    home_direction: CW
+    home_direction: CCW
     home_speed: 100
     offset_speed: 100
     endstop_level: Low
   - id: 5
     speed_rpm: 500
     acceleration: 40
-    direction: CCW
+    direction: CW
     homing_offset: -208066
-    home_direction: CCW
+    home_direction: CW
     home_speed: 100
     offset_speed: 300
     endstop_level: Low
