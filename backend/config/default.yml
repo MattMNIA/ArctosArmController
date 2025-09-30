@@ -11,7 +11,7 @@ can_driver:
   - 33
   motors:
   - id: 0
-    speed_rpm: 1
+    speed_rpm: 300
     acceleration: 50
     direction: CCW
     homing_offset: -99195
@@ -27,7 +27,6 @@ can_driver:
     home_direction: CCW
     home_speed: 60
     offset_speed: 100
-
     endstop_level: High
   - id: 2
     speed_rpm: 200
