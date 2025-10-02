@@ -5,3 +5,4 @@ pybullet
 flask-cors
 requests
 opencv-python
+opencv-contrib-python

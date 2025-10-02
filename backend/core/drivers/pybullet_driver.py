@@ -3,7 +3,11 @@ import pybullet_data
 import time
 from typing import List, Dict, Any, Optional
 import logging
+import math
 import numpy as np
+from pathlib import Path
+
+from utils.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +29,10 @@ class PyBulletDriver:
         self.num_joints: int = 0
         self.joint_indices: List[int] = []
         self.time_step = 1.0 / 240.0  # default PyBullet timestep
+        self.default_speed_rpm = 200.0
+        self.config_manager: Optional[ConfigManager] = None
+        self._motor_speed_limits: List[Optional[float]] = []
+        self._load_speed_configuration()
         logger.info("PyBulletDriver created with URDF: %s, GUI: %s", urdf_path, gui)
         
 
@@ -96,29 +104,96 @@ class PyBulletDriver:
                 )
         self.step_simulation(1.0)
 
-    def send_joint_targets(self, q: List[float], t_s: float):
+    def send_joint_targets(self, q: List[float], t_s: Optional[float] = None):
         """
         Command the robot to move towards target joint positions.
         :param q: List of target joint angles (len must match num_joints).
-        :param t_s: Duration to hold the command (not smooth trajectory yet).
+        :param t_s: Optional duration hint for simulation stepping.
         """
         if len(q) != self.num_joints:
             logger.error(f"Expected {self.num_joints} joints, got {len(q)}")
             raise ValueError(f"Expected {self.num_joints} joints, got {len(q)}")
 
-        logger.info(f"Sending joint targets: {q} for {t_s} seconds")
+        # Get current joint positions
+        current_feedback = self.get_feedback()
+        current_q = current_feedback["q"]
 
-        for j, angle in enumerate(q):
-            logger.debug(f"Setting joint {j} to {angle} radians")
+        deltas = [abs(target - current) for target, current in zip(q, current_q)]
+
+        if t_s is None:
+            duration_candidates: List[float] = []
+            for idx, delta in enumerate(deltas):
+                speed_limit = self._joint_speed_limit_for_index(idx)
+                if speed_limit and speed_limit > 0:
+                    duration_candidates.append(delta / speed_limit)
+            duration_value = max(duration_candidates) if duration_candidates else 0.5
+        else:
+            duration_value = t_s
+
+        duration_value = max(duration_value, 0.1)
+
+        logger.info(f"Sending joint targets: {q} for {duration_value:.3f} seconds")
+
+        for j, (target_angle, current_angle, delta) in enumerate(zip(q, current_q, deltas)):
+            logger.debug(f"Setting joint {j} to {target_angle} radians")
+            max_velocity = (delta / duration_value) if duration_value > 0 else 0.0
             p.setJointMotorControl2(
-            self.robot_id,
-            j,
-            controlMode=p.POSITION_CONTROL,
-            targetPosition=angle
+                self.robot_id,
+                self.joint_indices[j],
+                controlMode=p.POSITION_CONTROL,
+                targetPosition=target_angle,
+                maxVelocity=max_velocity
             )
 
-        # Step simulation for t_s seconds
-        self.step_simulation(t_s)
+        logger.debug(f"Stepping simulation for {duration_value:.3f}s based on joint speed limits")
+        self.step_simulation(duration_value)
+
+    def _load_speed_configuration(self) -> None:
+        try:
+            config_path = Path(__file__).parent.parent.parent / "config" / "default.yml"
+            self.config_manager = ConfigManager(config_path)
+            motors = self.config_manager.get('can_driver.motors', []) if self.config_manager else []
+        except Exception as e:
+            logger.debug(f"Failed to load speed configuration: {e}")
+            self.config_manager = None
+            motors = []
+
+        motor_limits: List[Optional[float]] = [None] * 6
+        for mc in motors:
+            if not isinstance(mc, dict):
+                continue
+            motor_id = mc.get('id')
+            speed_rpm = mc.get('speed_rpm')
+            if motor_id is None or speed_rpm is None:
+                continue
+            try:
+                motor_limits[motor_id] = (speed_rpm * 2 * math.pi) / 60.0
+            except Exception:
+                continue
+
+        self._motor_speed_limits = motor_limits
+
+    def _joint_speed_limit_for_index(self, joint_index: int) -> Optional[float]:
+        if not self._motor_speed_limits:
+            return None
+
+        if joint_index < 4:
+            if joint_index < len(self._motor_speed_limits):
+                return self._motor_speed_limits[joint_index]
+            return None
+
+        if joint_index in (4, 5):
+            candidates = []
+            if len(self._motor_speed_limits) > 4 and self._motor_speed_limits[4]:
+                candidates.append(self._motor_speed_limits[4])
+            if len(self._motor_speed_limits) > 5 and self._motor_speed_limits[5]:
+                candidates.append(self._motor_speed_limits[5])
+            return min(candidates) if candidates else None
+
+        if joint_index < len(self._motor_speed_limits):
+            return self._motor_speed_limits[joint_index]
+
+        return None
 
     def open_gripper(self) -> None:
         """Open gripper to maximum width (0.015m separation)"""

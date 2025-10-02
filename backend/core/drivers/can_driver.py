@@ -864,14 +864,14 @@ class CanDriver():
         logger.info("Full coordinated homing of joints 4 and 5 completed successfully")
 
 
-    def send_joint_targets(self, q: List[float], t_s: float = 1.0):
+    def send_joint_targets(self, q: List[float], t_s: Optional[float] = None):
         """
         Send joint targets directly to motors (no coupling logic here).
         Joint-to-motor transformation should be handled at a higher level.
         
         Args:
             q: List of motor angles in radians [motor0, motor1, motor2, motor3, motor4, motor5]
-            t_s: Duration in seconds
+            t_s: Optional duration hint (unused for CAN execution)
         """
         if self.bus is None:
             logger.warning("CAN bus not initialized. Call connect() first.")

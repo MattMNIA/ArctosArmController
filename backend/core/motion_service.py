@@ -1,6 +1,8 @@
 import threading
 import time
 import queue
+import math
+from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Callable, Protocol, Union
 import logging
 from abc import ABC, abstractmethod
@@ -22,15 +24,20 @@ class Command(ABC):
 
 class JointCommand(Command):
     """Command for joint movements."""
-    def __init__(self, q: List[float], duration_s: float):
+    def __init__(self, q: List[float], duration_s: Optional[float] = None):
         self.q = q
         self.duration_s = duration_s
 
     def execute(self, driver) -> None:
         """Start the joint movement (non-blocking)."""
-        driver.send_joint_targets(self.q, self.duration_s)
+        if self.duration_s is None:
+            driver.send_joint_targets(self.q)
+        else:
+            driver.send_joint_targets(self.q, self.duration_s)
 
     def get_description(self) -> str:
+        if self.duration_s is None:
+            return f"Joint move: q={self.q}, adaptive duration"
         return f"Joint move: q={self.q}, duration={self.duration_s}s"
 
 class GripperCommand(Command):
@@ -66,6 +73,19 @@ class HomeCommand(Command):
     def get_description(self) -> str:
         return f"Home joints: {self.joint_indices}"
 
+
+@dataclass
+class ActiveCommandContext:
+    command: Command
+    start_time: float
+    min_duration: float
+    timeout: float
+    target_q: Optional[List[float]] = None
+    target_gripper: Optional[float] = None
+    tolerance: float = 0.02
+    velocity_tolerance: float = 0.05
+    complete_on_return: bool = False
+
 class MotionService:
     """
     Manages motion commands via a queue and executes them in a separate thread.
@@ -89,6 +109,11 @@ class MotionService:
         self._current_command: Optional[Command] = None
         self._command_start_time = 0.0
         self._current_gripper_position = 0.0  # Track gripper position (0.0-1.0 range)
+        self._active_context: Optional[ActiveCommandContext] = None
+        self._position_tolerance = 0.02  # radians (~1.1 degrees)
+        self._velocity_tolerance = 0.05  # rad/s
+        self._min_joint_timeout = 3.0
+        self._joint_timeout_scale = 2.5
 
     @property
     def current_state(self):
@@ -162,6 +187,7 @@ class MotionService:
         logger.info(f"Enqueued command: {cmd.get_description()}")
         if self.paused:
             self.paused = False
+            self.current_state = "RUNNING"
             logger.info("Resuming execution after limit hit due to new command.")
         self.command_queue.put(cmd)
 
@@ -213,12 +239,9 @@ class MotionService:
                     except queue.Empty:
                         pass
                 
-                # Check if current command is complete
-                self._check_command_completion()
-                
                 # Always emit telemetry (outside locks)
                 feedback = self.driver.get_feedback()
-                self._emit_status(feedback)
+                self._handle_feedback(feedback)
                 
             except Exception as e:
                 logger.error(f"Error in motion service loop: {e}")
@@ -232,6 +255,11 @@ class MotionService:
             logger.warning(f"Execution paused due to limit hit. Skipping command: {cmd.get_description()}")
             return
         
+        start_time = time.time()
+        context = self._build_context_for_command(cmd, start_time)
+        context.tolerance = self._position_tolerance
+        context.velocity_tolerance = self._velocity_tolerance
+        
         # Check if we're already executing something
         with self._command_lock:
             if self._current_command is not None:
@@ -240,7 +268,8 @@ class MotionService:
             
             # Set current command
             self._current_command = cmd
-            self._command_start_time = time.time()
+            self._command_start_time = start_time
+            self._active_context = context
         
         # Update state
         self.current_state = "EXECUTING"
@@ -250,41 +279,145 @@ class MotionService:
             # Execute command outside of locks to prevent deadlocks
             cmd.execute(self.driver)
             
-            if isinstance(cmd, (GripperCommand, HomeCommand)):
-                # Gripper and home commands have a 0.5 second delay to prevent overwhelming the servo
-                pass  # Don't mark as complete immediately
-                
+            if context.complete_on_return:
+                self._complete_current_command(new_state="IDLE")
         except Exception as e:
             logger.error(f"Error executing command {cmd.get_description()}: {e}")
-            self.current_state = "ERROR"
-            with self._command_lock:
-                self._current_command = None
-                
-    def _check_command_completion(self):
-        """Check if the current command has completed."""
+            self._abort_current_command(f"Error executing command {cmd.get_description()} : {e}", new_state="ERROR")
+
+    def _build_context_for_command(self, cmd: Command, start_time: float) -> ActiveCommandContext:
+        if isinstance(cmd, JointCommand):
+            target_q = list(cmd.q)
+            estimated_time = self._estimate_joint_motion_time(target_q)
+            base_time = cmd.duration_s if cmd.duration_s is not None else estimated_time
+            base_time = max(base_time, 0.1)
+            min_duration = max(0.1, min(base_time * 0.5, base_time))
+            timeout = (base_time * self._joint_timeout_scale) + 1.0
+            timeout = max(timeout, self._min_joint_timeout, min_duration + 1.0)
+            return ActiveCommandContext(
+                command=cmd,
+                start_time=start_time,
+                min_duration=min_duration,
+                timeout=timeout,
+                target_q=target_q
+            )
+        if isinstance(cmd, GripperCommand):
+            min_duration = max(cmd.delay, 0.1)
+            timeout = min_duration + 1.0
+            if cmd.action == 'set' and cmd.position is not None:
+                target_gripper = cmd.position
+            elif cmd.action == 'open':
+                target_gripper = 1.0
+            elif cmd.action == 'close':
+                target_gripper = 0.0
+            else:
+                target_gripper = None
+            return ActiveCommandContext(
+                command=cmd,
+                start_time=start_time,
+                min_duration=min_duration,
+                timeout=timeout,
+                target_gripper=target_gripper
+            )
+        if isinstance(cmd, HomeCommand):
+            return ActiveCommandContext(
+                command=cmd,
+                start_time=start_time,
+                min_duration=0.0,
+                timeout=90.0,
+                complete_on_return=True
+            )
+        return ActiveCommandContext(
+            command=cmd,
+            start_time=start_time,
+            min_duration=0.1,
+            timeout=self._min_joint_timeout
+        )
+
+    def _complete_current_command(self, new_state: str = "IDLE") -> None:
         with self._command_lock:
-            if self._current_command is not None:
-                elapsed = time.time() - self._command_start_time
-                
-                if isinstance(self._current_command, JointCommand):
-                    if elapsed >= self._current_command.duration_s:
-                        logger.info(f"Joint command execution complete after {elapsed:.2f}s")
-                        self._current_command = None
-                        self.current_state = "IDLE"
-                elif isinstance(self._current_command, (GripperCommand, HomeCommand)):
-                    required_delay = self._current_command.delay if isinstance(self._current_command, GripperCommand) else 1.25
-                    if elapsed >= required_delay:
-                        logger.info(f"Gripper/Home command execution complete after {elapsed:.2f}s")
-                        self._current_command = None
-                        self.current_state = "IDLE"
+            if self._current_command is None:
+                return
+            description = self._current_command.get_description()
+            self._current_command = None
+            self._active_context = None
+        self.current_state = new_state
+        logger.info(f"Completed command: {description}")
+
+    def _abort_current_command(self, reason: str, new_state: Optional[str] = None) -> None:
+        with self._command_lock:
+            if self._current_command is None:
+                return
+            description = self._current_command.get_description()
+            self._current_command = None
+            self._active_context = None
+        logger.warning(f"Aborting command '{description}': {reason}")
+        if new_state:
+            self.current_state = new_state
+
+    def _check_command_completion(self, feedback: Dict[str, Any]):
+        """Check if the current command has completed using feedback and timing."""
+        with self._command_lock:
+            context = self._active_context
+        
+        if context is None or context.complete_on_return:
+            return
+
+        elapsed = time.time() - context.start_time
+
+        if elapsed > context.timeout:
+            self._abort_current_command(
+                f"Command timeout after {elapsed:.2f}s (limit {context.timeout:.2f}s)",
+                new_state="TIMEOUT"
+            )
+            self.paused = True
+            return
+
+        if isinstance(context.command, JointCommand):
+            joint_feedback = feedback.get("q", [])
+            velocities = feedback.get("dq", [])
+            target = context.target_q or []
+
+            if not joint_feedback or not target:
+                return
+
+            paired = list(zip(target, joint_feedback))
+            if not paired:
+                return
+
+            position_error = max(abs(t - q) for t, q in paired)
+            velocity_samples = velocities[:len(paired)] if velocities else []
+            max_velocity = max(abs(v) for v in velocity_samples) if velocity_samples else 0.0
+
+            if (
+                elapsed >= context.min_duration and
+                position_error <= context.tolerance and
+                max_velocity <= context.velocity_tolerance
+            ):
+                logger.info(
+                    "Joint command complete: max_error=%.4f rad, max_velocity=%.4f rad/s, elapsed=%.2fs",
+                    position_error,
+                    max_velocity,
+                    elapsed
+                )
+                self._complete_current_command()
+        elif isinstance(context.command, GripperCommand):
+            if elapsed >= context.min_duration:
+                logger.info(
+                    "Gripper command complete after %.2fs",
+                    elapsed
+                )
+                self._complete_current_command()
 
     def _emit_status(self, feedback: Dict[str, Any]):
         """Emit status via WebSocket."""
         try:
             should_pause = self.driver.handle_limits(feedback)
             if should_pause:
+                if not self.paused:
+                    logger.warning("Pausing motion due to limit hit reported by driver")
                 self.paused = True
-                self.current_state = "LIMIT_HIT"
+                self._abort_current_command("Limit switch triggered", new_state="LIMIT_HIT")
 
             # Get encoder values - prefer motor encoders if available, otherwise convert joint angles
             joint_angles = feedback.get("q", [])
@@ -326,6 +459,101 @@ class MotionService:
         except Exception as e:
             logger.error(f"Error emitting status: {e}")
 
+    def _handle_feedback(self, feedback: Dict[str, Any]):
+        if feedback is None:
+            return
+        self._emit_status(feedback)
+        self._check_command_completion(feedback)
+
+    def _estimate_joint_motion_time(self, target_q: List[float]) -> float:
+        try:
+            feedback = self.driver.get_feedback() or {}
+        except Exception as e:
+            logger.debug(f"Unable to query feedback for timing estimate: {e}")
+            feedback = {}
+
+        current_q = feedback.get("q", [])
+        joint_speeds = self._infer_joint_speed_limits(len(target_q))
+
+        deltas: List[float] = []
+        paired_len = min(len(current_q), len(target_q))
+        for i in range(paired_len):
+            deltas.append(abs(target_q[i] - current_q[i]))
+        for i in range(paired_len, len(target_q)):
+            deltas.append(abs(target_q[i]))
+
+        times: List[float] = []
+        for idx, delta in enumerate(deltas):
+            speed = joint_speeds[idx] if idx < len(joint_speeds) else None
+            if speed is None or speed <= 0:
+                continue
+            times.append(delta / speed if speed > 0 else 0.0)
+
+        if not times:
+            logger.debug("Unable to infer joint timings from configuration; using minimum timeout")
+            return max(self._min_joint_timeout, 0.5)
+
+        estimated = max(times)
+        return max(estimated, 0.1)
+
+    def _infer_joint_speed_limits(self, num_joints: int) -> List[Optional[float]]:
+        can_driver = self._extract_can_driver()
+        if can_driver is None:
+            return [None] * num_joints
+
+        try:
+            motor_configs = can_driver.config_manager.get('can_driver.motors', [])
+        except Exception as e:
+            logger.warning(f"Failed to load motor configs for speed inference: {e}")
+            motor_configs = []
+
+        speed_map = {mc['id']: mc.get('speed_rpm') for mc in motor_configs if isinstance(mc, dict) and 'id' in mc}
+
+        limits: List[Optional[float]] = []
+        for joint_idx in range(num_joints):
+            candidates: List[float] = []
+            mapping: Dict[int, float] = {}
+            try:
+                mapping = can_driver.joint_velocity_to_motors(joint_idx, 1.0)
+            except Exception as e:
+                logger.debug(f"Failed to map joint {joint_idx} to motors for speed inference: {e}")
+
+            if not mapping:
+                speed_rpm = speed_map.get(joint_idx)
+                limits.append(self._rpm_to_rad_s(speed_rpm))
+                continue
+
+            for motor_id, scale in mapping.items():
+                speed_rpm = speed_map.get(motor_id)
+                if speed_rpm is None or speed_rpm <= 0:
+                    continue
+                rad_s = self._rpm_to_rad_s(speed_rpm)
+                if rad_s is None:
+                    continue
+                scale_mag = abs(scale) if scale is not None else 0.0
+                if scale_mag <= 0:
+                    continue
+                candidates.append(rad_s / scale_mag)
+
+            limits.append(min(candidates) if candidates else None)
+
+        return limits
+
+    def _extract_can_driver(self) -> Optional[CanDriver]:
+        if isinstance(self.driver, CanDriver):
+            return self.driver
+        if isinstance(self.driver, CompositeDriver):
+            for drv in self.driver.drivers:
+                if isinstance(drv, CanDriver):
+                    return drv
+        return None
+
+    @staticmethod
+    def _rpm_to_rad_s(speed_rpm: Optional[float]) -> Optional[float]:
+        if speed_rpm is None:
+            return None
+        return (speed_rpm * 2 * math.pi) / 60.0
+
     def open_gripper(self):
         """Enqueue a command to open the gripper."""
         self._cancel_pending_gripper_commands()  # Cancel any pending gripper commands
@@ -357,7 +585,7 @@ class MotionService:
         self._current_gripper_position = target_position
 
 
-    def send_joint_targets(self, q: List[float], duration_s: float = 1.0):
+    def send_joint_targets(self, q: List[float], duration_s: Optional[float] = None):
         """Enqueue a joint movement command."""
         cmd = JointCommand(q, duration_s)
         self.enqueue(cmd)
@@ -371,6 +599,7 @@ class MotionService:
         """Emergency stop all motors immediately."""
         logger.warning("🚨 EMERGENCY STOP ACTIVATED")
         self.clear_queue()
+        self._abort_current_command("Emergency stop invoked")
         if hasattr(self.driver, 'estop'):
             self.driver.estop()
         self.current_state = "EMERGENCY_STOP"
