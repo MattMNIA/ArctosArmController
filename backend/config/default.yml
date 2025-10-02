@@ -60,7 +60,7 @@ can_driver:
     acceleration: 40
     direction: CW
     homing_offset: -208066
-    home_direction: CW
+    home_direction: CCW
     home_speed: 100
     offset_speed: 300
     endstop_level: Low

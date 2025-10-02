@@ -28,7 +28,7 @@ class CompositeDriver:
     def home_joints(self, joint_indices):
         for d in self.drivers: d.home_joints(joint_indices)
 
-    def send_joint_targets(self, q, t_s):
+    def send_joint_targets(self, q, t_s=None):
         threads = []
         for d in self.drivers:
             thread = threading.Thread(target=d.send_joint_targets, args=(q, t_s))
