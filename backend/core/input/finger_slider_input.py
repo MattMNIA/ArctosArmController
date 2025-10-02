@@ -5,6 +5,7 @@ import cv2
 import mediapipe as mp
 
 from .base_input import InputController
+from .camera_selector import select_camera_index
 
 
 class FingerSliderInput(InputController):
@@ -34,7 +35,7 @@ class FingerSliderInput(InputController):
 
     def __init__(
         self,
-        camera_index: int = 0,
+    camera_index: Optional[int] = None,
         touch_threshold: float = 0.1,
         joint_pairs: Optional[Dict[str, Tuple[int, int]]] = None,
         max_num_hands: int = 2,
@@ -49,7 +50,11 @@ class FingerSliderInput(InputController):
         show_window: bool = True,
         window_name: str = "Finger Slider Input",
     ) -> None:
-        self._capture = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+        selected_index = select_camera_index(camera_index)
+        self._camera_index = selected_index
+        self._capture = cv2.VideoCapture(selected_index, cv2.CAP_DSHOW)
+        if not self._capture or not self._capture.isOpened():
+            raise RuntimeError(f"Failed to open camera index {selected_index}.")
         self._hands = mp.solutions.hands.Hands(
             max_num_hands=max_num_hands,
             min_detection_confidence=detection_confidence,

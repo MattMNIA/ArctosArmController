@@ -94,6 +94,8 @@ Start with:
 python app.py --drivers pybullet --teleop finger-sliders
 ```
 
+Both finger-based modes scan for available cameras at startup. If more than one camera is detected, you'll be prompted to choose which one to use.
+
 ### Setup
 1. Ensure pygame is installed: `pip install pygame`
 2. For Xbox controller, connect via USB or Bluetooth
