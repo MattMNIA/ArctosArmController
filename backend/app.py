@@ -15,6 +15,8 @@ from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
 from core.teleop_controller import TeleopController
 from core.input.keyboard_input import KeyboardController
 from core.input.xbox_input import XboxController
+from core.input.finger_input import FingerInput as FingerInputController
+from core.input.finger_slider_input import FingerSliderInput
 import utils.logger  # Import to trigger logging setup
 import threading
 import time
@@ -72,7 +74,7 @@ def create_app(drivers_list):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the Arctos Arm Controller")
     parser.add_argument('--drivers', nargs='+', choices=['sim', 'pybullet', 'can'], default=['can'], help="Specify which drivers to use")
-    parser.add_argument('--teleop', choices=['keyboard', 'xbox'], help="Enable teleoperation with specified input device")
+    parser.add_argument('--teleop', choices=['keyboard', 'xbox', 'fingers', 'finger-sliders'], help="Enable teleoperation with specified input device")
     args = parser.parse_args()
     
     # Check if Xbox controller is connected
@@ -103,6 +105,10 @@ if __name__ == "__main__":
         print(f"Enabling teleoperation with {teleop_mode} input...")
         if teleop_mode == 'xbox':
             input_controller = XboxController()
+        elif teleop_mode == 'fingers':
+            input_controller = FingerInputController()
+        elif teleop_mode == 'finger-sliders':
+            input_controller = FingerSliderInput()
         else:
             input_controller = KeyboardController()
         

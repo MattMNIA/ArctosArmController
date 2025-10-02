@@ -40,7 +40,7 @@ Frontend runs at [http://localhost:5173](http://localhost:5173).
 * **WebSocket telemetry** feed (state + joint positions)
 * **Simulation driver** (`SimDriver`) for safe testing
 * Basic React UI for sending commands and viewing telemetry
-* **Teleoperation control** with keyboard and Xbox controller support
+* **Teleoperation control** with keyboard, Xbox controller, and finger-gesture inputs
 
 ---
 
@@ -63,10 +63,41 @@ The system supports real-time teleoperation control for precise robotic arm mani
 - **A Button**: Emergency stop
 - **B Button**: Exit teleoperation mode
 
+### Finger Gesture (Toggle) Controls
+Thumb–finger pinches map directly to joint velocity presses. Touch a finger to move a joint, release to stop.
+
+- **Thumb + Index**: Joint 0 forward (right hand) / Joint 0 reverse (left hand)
+- **Thumb + Middle**: Joint 1
+- **Thumb + Ring**: Joint 2
+- **Thumb + Pinky**: Joint 3
+- Movement direction depends on the hand you present to the camera.
+
+Start with:
+
+```bash
+python app.py --drivers pybullet --teleop fingers
+```
+
+### Finger Slider Controls
+Pinch the thumb and a finger, then move while holding the pinch to command two joints as proportional sliders:
+
+- **Thumb + Index**: Horizontal motion controls Joint 0, vertical motion controls Joint 1
+- **Thumb + Middle**: Horizontal motion controls Joint 2, vertical motion controls Joint 3
+- **Thumb + Ring**: Horizontal motion controls Joint 4, vertical motion controls Joint 5
+- **Thumb + Pinky**: Vertical motion opens/closes the gripper (up = open, down = close)
+
+Grip is re-centered each time you release and re-pin. Movements are smoothed and accept subtle adjustments.
+
+Start with:
+
+```bash
+python app.py --drivers pybullet --teleop finger-sliders
+```
+
 ### Setup
 1. Ensure pygame is installed: `pip install pygame`
 2. For Xbox controller, connect via USB or Bluetooth
-3. Run teleoperation: Access via API endpoint or integrated UI
+3. Run teleoperation: Access via API endpoint, integrated UI, or the `--teleop` CLI flag shown above
 
 ### Calibration
 The Xbox controller automatically calibrates deadzones on startup to prevent stick drift. Triggers use a 0.5 threshold to ensure clean release behavior.
