@@ -31,6 +31,8 @@ def run_teleop_loop(teleop_controller):
             time.sleep(0.02)  # ~50Hz control loop
     except Exception as e:
         print(f"Teleop loop stopped: {e}")
+        raise
+    finally:
         teleop_controller.stop_all()
 
 def create_app(drivers_list):
