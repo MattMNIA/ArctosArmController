@@ -482,6 +482,7 @@ class CanDriver():
         """
         Disables the servo motors connected to the CAN bus with proper cleanup.
         """
+        #FIXME Fix disable error handling
         if self.bus is None:
             logger.warning("CAN bus not initialized.")
             return
