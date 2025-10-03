@@ -57,6 +57,8 @@ class FingerInput(InputController):
         self._show_window = show_window
         self._window_name = window_name
         self._allow_fullscreen_toggle = allow_fullscreen_toggle and show_window
+        self._drawing_utils = mp.solutions.drawing_utils
+        self._hand_overlay_enabled = False
         self._reference_palm_size: Optional[float] = None
         self._current_touch_threshold = touch_threshold
         self._current_scale = 1.0
@@ -138,6 +140,12 @@ class FingerInput(InputController):
             ):
                 label = handedness.classification[0].label  # 'Left' or 'Right'
                 landmarks = hand_landmarks.landmark
+                if frame_to_show is not None and self._hand_overlay_enabled:
+                    self._drawing_utils.draw_landmarks(
+                        frame_to_show,
+                        hand_landmarks,
+                        mp.solutions.hands.HAND_CONNECTIONS,
+                    )
                 for finger, tip_idx in self.FINGER_TIPS.items():
                     touching = self._fingers_touching(landmarks, 4, tip_idx)
                     if touching:
@@ -148,12 +156,26 @@ class FingerInput(InputController):
                         break
 
         if frame_to_show is not None:
+            status_text = f"Overlay [H]: {'ON' if self._hand_overlay_enabled else 'OFF'}"
+            status_color = (0, 200, 0) if self._hand_overlay_enabled else (160, 160, 160)
+            cv2.putText(
+                frame_to_show,
+                status_text,
+                (10, 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                status_color,
+                1,
+                cv2.LINE_AA,
+            )
             cv2.imshow(self._window_name, frame_to_show)
             key = cv2.waitKey(1) & 0xFF
             if self._allow_fullscreen_toggle and key in (ord("f"), ord("F")):
                 current_flag = cv2.getWindowProperty(self._window_name, cv2.WND_PROP_FULLSCREEN)
                 target_flag = cv2.WINDOW_NORMAL if current_flag >= 0.5 else cv2.WINDOW_FULLSCREEN
                 cv2.setWindowProperty(self._window_name, cv2.WND_PROP_FULLSCREEN, target_flag)
+            if key in (ord("h"), ord("H")):
+                self._hand_overlay_enabled = not self._hand_overlay_enabled
 
         return gestures
 

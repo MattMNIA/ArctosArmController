@@ -96,6 +96,8 @@ class FingerSliderInput(InputController):
         self._show_window = show_window
         self._window_name = window_name
         self._allow_fullscreen_toggle = allow_fullscreen_toggle and show_window
+        self._drawing_utils = mp.solutions.drawing_utils
+        self._hand_overlay_enabled = False
         self._reference_palm_size: Optional[float] = None
         self._current_touch_threshold = touch_threshold
         self._current_scale = 1.0
@@ -220,8 +222,12 @@ class FingerSliderInput(InputController):
                 label = handedness.classification[0].label  # 'Left' or 'Right'
                 landmarks = hand_landmarks.landmark
                 thumb_tip = landmarks[4]
-
-                # Removed drawing_utils for faster updates
+                if frame_to_show is not None and self._hand_overlay_enabled:
+                    self._drawing_utils.draw_landmarks(
+                        frame_to_show,
+                        hand_landmarks,
+                        mp.solutions.hands.HAND_CONNECTIONS,
+                    )
 
                 for finger_name, tip_idx in self.FINGER_TIPS.items():
                     if finger_name not in self._joint_pairs and finger_name != "pinky":
@@ -321,11 +327,23 @@ class FingerSliderInput(InputController):
                 del self._pinch_states[key]
 
         if frame_to_show is not None:
+            status_text = f"Overlay [H]: {'ON' if self._hand_overlay_enabled else 'OFF'}"
+            status_color = (0, 200, 0) if self._hand_overlay_enabled else (160, 160, 160)
+            cv2.putText(
+                frame_to_show,
+                status_text,
+                (10, 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                status_color,
+                1,
+                cv2.LINE_AA,
+            )
             for idx, text in enumerate(overlay_rows):
                 cv2.putText(
                     frame_to_show,
                     text,
-                    (10, 20 + idx * 20),
+                    (10, 40 + idx * 20),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255, 255, 255),
@@ -338,6 +356,8 @@ class FingerSliderInput(InputController):
                 current_flag = cv2.getWindowProperty(self._window_name, cv2.WND_PROP_FULLSCREEN)
                 target_flag = cv2.WINDOW_NORMAL if current_flag >= 0.5 else cv2.WINDOW_FULLSCREEN
                 cv2.setWindowProperty(self._window_name, cv2.WND_PROP_FULLSCREEN, target_flag)
+            if key in (ord("h"), ord("H")):
+                self._hand_overlay_enabled = not self._hand_overlay_enabled
 
         self._latest_joint_values = dict(joint_values)
         self._latest_gripper_value = gripper_value
