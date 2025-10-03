@@ -50,6 +50,7 @@ class FingerInput(InputController):
         )
         self._joint_map = joint_map or self.DEFAULT_JOINT_MAP
         self._touch_threshold = touch_threshold
+        self._base_touch_threshold = touch_threshold
         self._scale = scale
         self._last_gestures = cast(Dict[str, Optional[str]], {"Left": None, "Right": None})
         self._lock = threading.Lock()
@@ -59,11 +60,18 @@ class FingerInput(InputController):
         self._window_created = False
         self._fullscreen = fullscreen
         self._allow_fullscreen_toggle = allow_fullscreen_toggle
-        self._max_capture_width = 1920
+        self._max_capture_width = 1280
         self._max_capture_height = 1080
         self._capture_resolution_target: Optional[Tuple[int, int]] = None
         self._capture_resolution_failed = False
         self._initialize_capture_resolution()
+        self._reference_palm_size: Optional[float] = None
+        self._current_touch_threshold = touch_threshold
+        self._current_scale = 1.0
+        self._threshold_smoothing = 0.4
+        self._hand_scale_smoothing = 0.35
+        self._min_threshold_scale = 0.6
+        self._max_threshold_scale = 1.8
 
     def get_commands(self) -> Dict[Union[int, str], float]:
         self._process_frame()
@@ -156,7 +164,53 @@ class FingerInput(InputController):
     def _fingers_touching(self, landmarks, idx1: int, idx2: int) -> bool:
         dx = landmarks[idx2].x - landmarks[idx1].x
         dy = landmarks[idx2].y - landmarks[idx1].y
-        return (dx * dx + dy * dy) ** 0.5 < self._touch_threshold
+        dynamic_threshold = self._get_dynamic_touch_threshold(landmarks)
+        return (dx * dx + dy * dy) ** 0.5 < dynamic_threshold
+
+    def _get_dynamic_touch_threshold(self, landmarks) -> float:
+        base_span = self._compute_palm_span(landmarks)
+        if base_span <= 0.0:
+            return self._base_touch_threshold
+
+        scale = self._update_hand_scale(base_span)
+        target = self._base_touch_threshold * scale
+        if self._threshold_smoothing <= 0.0:
+            self._current_touch_threshold = target
+            return target
+
+        alpha = min(max(self._threshold_smoothing, 0.0), 1.0)
+        self._current_touch_threshold = (
+            (1.0 - alpha) * self._current_touch_threshold + alpha * target
+        )
+        return self._current_touch_threshold
+
+    def _update_hand_scale(self, base_span: float) -> float:
+        if base_span <= 0.0:
+            return self._current_scale
+
+        if self._reference_palm_size is None or self._reference_palm_size <= 0.0:
+            self._reference_palm_size = base_span
+            self._current_scale = 1.0
+            return self._current_scale
+
+        target_scale = base_span / self._reference_palm_size
+        target_scale = max(self._min_threshold_scale, min(self._max_threshold_scale, target_scale))
+
+        if self._hand_scale_smoothing <= 0.0:
+            self._current_scale = target_scale
+            return self._current_scale
+
+        alpha = min(max(self._hand_scale_smoothing, 0.0), 1.0)
+        self._current_scale = (1.0 - alpha) * self._current_scale + alpha * target_scale
+        return self._current_scale
+
+    @staticmethod
+    def _compute_palm_span(landmarks) -> float:
+        base_idx_a = 5  # Index finger MCP
+        base_idx_b = 17  # Pinky MCP
+        dx = landmarks[base_idx_b].x - landmarks[base_idx_a].x
+        dy = landmarks[base_idx_b].y - landmarks[base_idx_a].y
+        return (dx * dx + dy * dy) ** 0.5
 
     def _ensure_window(self) -> None:
         if not self._show_window:

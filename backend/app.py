@@ -124,9 +124,27 @@ if __name__ == "__main__":
             run_teleop_loop(teleop_controller)
         except KeyboardInterrupt:
             print("Shutting down...")
-            teleop_controller.stop_all()
-            # Stop motion service
-            app.config['motion_service'].stop()
+        finally:
+            try:
+                teleop_controller.stop_all()
+            except Exception:
+                pass
+            close_method = getattr(input_controller, "close", None)
+            if callable(close_method):
+                try:
+                    close_method()
+                except Exception:
+                    pass
+            try:
+                app.config['motion_service'].stop()
+            except Exception:
+                pass
+            if flask_thread and flask_thread.is_alive():
+                try:
+                    socketio.stop()
+                except Exception:
+                    pass
+                flask_thread.join(timeout=5.0)
     else:
         # Run Flask server normally
         print("Starting Flask server without teleoperation...")
