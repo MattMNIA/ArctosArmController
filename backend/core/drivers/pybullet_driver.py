@@ -36,6 +36,10 @@ class PyBulletDriver:
         logger.info("PyBulletDriver created with URDF: %s, GUI: %s", urdf_path, gui)
         
 
+    def _is_connected(self) -> bool:
+        return self.physics_client is not None and self.robot_id is not None
+
+
     def connect(self):
         if self.gui:
             self.physics_client = p.connect(p.GUI)
@@ -70,11 +74,21 @@ class PyBulletDriver:
 
     def disable(self):
         if self.physics_client is not None:
-            p.disconnect(self.physics_client)
-            print("[PyBulletDriver] Simulation stopped")
+            try:
+                p.disconnect(self.physics_client)
+                print("[PyBulletDriver] Simulation stopped")
+            except Exception as exc:
+                logger.error(f"Error disconnecting PyBullet client: {exc}")
+            finally:
+                self.physics_client = None
+                self.robot_id = None
+                self.num_joints = 0
+                self.joint_indices = []
 
     def step_simulation(self, duration_s: float):
         """Step the PyBullet simulation for the specified duration."""
+        if not self._is_connected():
+            return
         steps = int(duration_s / self.time_step)
         logger.debug(f"Stepping simulation for {steps} steps ({duration_s}s)")
         for _ in range(steps):
@@ -82,6 +96,8 @@ class PyBulletDriver:
             time.sleep(self.time_step)
 
     def home(self) -> None:
+        if not self._is_connected():
+            return
         for j in self.joint_indices:
             p.setJointMotorControl2(
                 self.robot_id,
@@ -93,6 +109,8 @@ class PyBulletDriver:
 
     def home_joints(self, joint_indices: List[int]) -> None:
         """Home specific joints to their zero positions."""
+        if not self._is_connected():
+            return
         for joint_idx in joint_indices:
             if joint_idx < len(self.joint_indices):
                 actual_joint_idx = self.joint_indices[joint_idx]
@@ -110,6 +128,10 @@ class PyBulletDriver:
         :param q: List of target joint angles (len must match num_joints).
         :param t_s: Optional duration hint for simulation stepping.
         """
+        if not self._is_connected():
+            logger.debug("PyBulletDriver is not connected; ignoring joint target command")
+            return
+
         if len(q) != self.num_joints:
             logger.error(f"Expected {self.num_joints} joints, got {len(q)}")
             raise ValueError(f"Expected {self.num_joints} joints, got {len(q)}")
@@ -199,6 +221,8 @@ class PyBulletDriver:
         """Open gripper to maximum width (0.015m separation)"""
         left_jaw_idx = 7   # jaw1 - moves in negative Z
         right_jaw_idx = 8  # jaw2 - moves in positive Z
+        if not self._is_connected():
+            return
         
         # Both jaws move to 0 (fully open)
         p.setJointMotorControl2(
@@ -223,6 +247,8 @@ class PyBulletDriver:
         """Close gripper to minimum width (0.0m separation)"""
         left_jaw_idx = 7
         right_jaw_idx = 8
+        if not self._is_connected():
+            return
         
         # Both jaws move to maximum limit (fully closed)
         p.setJointMotorControl2(
@@ -247,6 +273,8 @@ class PyBulletDriver:
         """Set gripper to specific opening width (0.0 to 0.015)"""
         left_jaw_idx = 7
         right_jaw_idx = 8
+        if not self._is_connected():
+            return
         
         # Clamp position to valid range
         clamped_position = max(0.0, min(position, 0.015))
@@ -272,6 +300,14 @@ class PyBulletDriver:
         
     def get_feedback(self) -> Dict[str, Any]:
         """Return current joint positions and velocities."""
+        if not self._is_connected():
+            joint_count = self.num_joints
+            return {
+                "q": [0.0] * joint_count,
+                "dq": [0.0] * joint_count,
+                "error": [],
+                "limits": [[False, False] for _ in range(joint_count)],
+            }
         # Step the simulation to advance time
         p.stepSimulation()
         
@@ -291,6 +327,8 @@ class PyBulletDriver:
 
     def get_camera_frame(self, width: int = 640, height: int = 480) -> np.ndarray:
         """Capture a camera frame from the PyBullet simulation."""
+        if not self._is_connected():
+            raise RuntimeError("PyBullet driver is not connected; camera frame unavailable")
         view_matrix = p.computeViewMatrix(
             cameraEyePosition=[1, 1, 1],
             cameraTargetPosition=[0, 0, 0],
@@ -306,6 +344,9 @@ class PyBulletDriver:
 
     def start_joint_velocity(self, joint_index: int, scale: float) -> None:
         """Start velocity control for a specific joint. Scale from -1.0 to 1.0."""
+        if not self._is_connected():
+            logger.debug("PyBulletDriver is not connected; ignoring velocity start command")
+            return
         if joint_index < 0 or joint_index >= self.num_joints:
             logger.error(f"Invalid joint index {joint_index}")
             return
@@ -327,6 +368,8 @@ class PyBulletDriver:
 
     def stop_joint_velocity(self, joint_index: int) -> None:
         """Stop velocity control for a specific joint."""
+        if not self._is_connected():
+            return
         if joint_index < 0 or joint_index >= self.num_joints:
             logger.error(f"Invalid joint index {joint_index}")
             return
@@ -342,6 +385,8 @@ class PyBulletDriver:
 
     def estop(self):
         """Stop motion immediately by zeroing motor torques."""
+        if not self._is_connected():
+            return
         for j in self.joint_indices:
             p.setJointMotorControl2(
                 self.robot_id,

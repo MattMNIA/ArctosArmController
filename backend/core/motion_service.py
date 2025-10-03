@@ -97,6 +97,7 @@ class MotionService:
         self.command_queue: "queue.Queue[Command]" = queue.Queue()
         self.running = False
         self.thread: Optional[threading.Thread] = None
+        self._shutdown_event = threading.Event()
         
         # Use separate locks for different data
         self._state_lock = threading.Lock()  # For state changes
@@ -145,6 +146,7 @@ class MotionService:
             self.running = True
             self._paused = False  # Reset paused on start
             self._current_state = "RUNNING"
+            self._shutdown_event.clear()
         
         # Initialize driver outside of lock
         try:
@@ -171,14 +173,27 @@ class MotionService:
             self._paused = False  # Reset paused on stop
         
         # Wait for thread and cleanup outside of lock
-        if self.thread:
-            self.thread.join(timeout=5.0)
-        
-        try:
-            self.driver.disable()
-        except Exception as e:
-            logger.error(f"Error disabling driver: {e}")
-        
+        loop_thread = self.thread
+        still_running = False
+        if loop_thread:
+            loop_thread.join(timeout=5.0)
+            still_running = loop_thread.is_alive()
+            if still_running:
+                logger.warning("MotionService loop thread did not exit within timeout")
+            elif self.thread is loop_thread:
+                self.thread = None
+
+        if not self._shutdown_event.wait(timeout=2.0):
+            if still_running:
+                logger.warning("MotionService shutdown not confirmed because loop thread is still running")
+            else:
+                logger.warning("MotionService shutdown not confirmed; disabling driver on main thread")
+                try:
+                    self.driver.disable()
+                except Exception as e:
+                    logger.error(f"Error disabling driver: {e}")
+            self._shutdown_event.set()
+
         self.current_state = "IDLE"
         logger.info("MotionService stopped")
 
@@ -224,30 +239,38 @@ class MotionService:
     def _loop(self):
         """Main execution loop."""
         dt = 1.0 / self.loop_hz
-        while self.running:
+        try:
+            while self.running:
+                try:
+                    # Check for new commands (non-blocking)
+                    current_cmd = None
+                    with self._command_lock:
+                        current_cmd = self._current_command
+                    
+                    if current_cmd is None and not self.paused:
+                        try:
+                            cmd = self.command_queue.get_nowait()
+                            logger.info(f"Retrieved command: {cmd.get_description()}")
+                            self._execute_command(cmd)
+                        except queue.Empty:
+                            pass
+                    
+                    # Always emit telemetry (outside locks)
+                    feedback = self.driver.get_feedback()
+                    self._handle_feedback(feedback)
+                    
+                except Exception as e:
+                    logger.error(f"Error in motion service loop: {e}")
+                    self.current_state = "ERROR"
+                
+                time.sleep(dt)
+        finally:
             try:
-                # Check for new commands (non-blocking)
-                current_cmd = None
-                with self._command_lock:
-                    current_cmd = self._current_command
-                
-                if current_cmd is None and not self.paused:
-                    try:
-                        cmd = self.command_queue.get_nowait()
-                        logger.info(f"Retrieved command: {cmd.get_description()}")
-                        self._execute_command(cmd)
-                    except queue.Empty:
-                        pass
-                
-                # Always emit telemetry (outside locks)
-                feedback = self.driver.get_feedback()
-                self._handle_feedback(feedback)
-                
+                self.driver.disable()
             except Exception as e:
-                logger.error(f"Error in motion service loop: {e}")
-                self.current_state = "ERROR"
-            
-            time.sleep(dt)
+                logger.error(f"Error disabling driver during shutdown: {e}")
+            finally:
+                self._shutdown_event.set()
 
     def _execute_command(self, cmd: Command):
         """Execute a command with proper error handling and no deadlocks."""
