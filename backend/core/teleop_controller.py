@@ -1,3 +1,4 @@
+import logging
 import math
 import time
 from typing import Dict, Any, List, Optional, Protocol
@@ -11,10 +12,12 @@ class DriverProtocol(Protocol):
     def set_gripper_position(self, position: float) -> None: ...
     def start_joint_velocity(self, joint_index: int, scale: float) -> None: ...
     def stop_joint_velocity(self, joint_index: int) -> None: ...
+    def home_joints(self, joint_indices: List[int]) -> None: ...
 
 # Import InputController here to avoid circular imports
 from .input.base_input import InputController
 #TODO Test new teleop controller and motion service integration
+logger = logging.getLogger(__name__)
 class TeleopController:
     """
     Handles teleoperation input and directly controls the robotic arm.
@@ -34,6 +37,7 @@ class TeleopController:
         self.last_gripper_update = 0  # Track time of last gripper update
         self.velocity_refresh_interval = 0.5  # seconds between keep-alive commands
         self._last_velocity_command: Dict[int, float] = {}
+        self._paused = False
 
     def teleop_step(self):
         """
@@ -44,7 +48,17 @@ class TeleopController:
         events = self.input_controller.get_events()
         now = time.time()
         for event, joint, scale in events:
+            if isinstance(joint, str):
+                if self._handle_special_event(event, joint, scale):
+                    continue
             if isinstance(joint, int) and joint < 6:  # joint indices 0-5
+                if self._paused:
+                    if event == 'release' and joint in self.active_movements:
+                        self.driver.stop_joint_velocity(joint)
+                        del self.active_movements[joint]
+                        self._last_velocity_command.pop(joint, None)
+                    continue
+
                 if event == 'press':
                     if abs(scale) < 1e-3:
                         if joint in self.active_movements:
@@ -70,11 +84,15 @@ class TeleopController:
                     if joint in self._last_velocity_command:
                         del self._last_velocity_command[joint]
             elif joint == "gripper_open":
+                if self._paused and event == 'press':
+                    continue
                 if event == 'press':
                     self.gripper_direction = 1  # Start opening
                 elif event == 'release':
                     self.gripper_direction = 0  # Stop
             elif joint == "gripper_close":
+                if self._paused and event == 'press':
+                    continue
                 if event == 'press':
                     self.gripper_direction = -1  # Start closing
                 elif event == 'release':
@@ -82,6 +100,9 @@ class TeleopController:
 
         # Handle incremental gripper control
         current_time = time.time()
+        if self._paused:
+            return
+
         if self.gripper_direction != 0 and (current_time - self.last_gripper_update) > 0.05:  # Update every 50ms - more frequent
             self.gripper_position += self.gripper_direction * self.gripper_increment
             self.gripper_position = max(0.0, min(1.0, self.gripper_position))  # Clamp to 0.0-1.0
@@ -97,6 +118,64 @@ class TeleopController:
             if current_time - last_sent >= self.velocity_refresh_interval:
                 self.driver.start_joint_velocity(joint, speed)
                 self._last_velocity_command[joint] = current_time
+
+    def _handle_special_event(self, event_type: str, token: str, scale: float) -> bool:
+        if token == "teleop_pause":
+            if event_type == 'press':
+                self._pause_teleop()
+            return True
+        if token == "teleop_resume":
+            if event_type == 'press':
+                self._resume_teleop()
+            return True
+        if token == "zero_all_joints":
+            if event_type == 'press':
+                self._zero_all_joints()
+            return True
+        return False
+
+    def _pause_teleop(self) -> None:
+        if self._paused:
+            return
+        logger.info("Teleoperation paused")
+        self.stop_all()
+        self._paused = True
+        if self.motion_service and hasattr(self.motion_service, "paused"):
+            try:
+                self.motion_service.paused = True
+            except Exception as exc:  # pragma: no cover - best effort logging
+                logger.debug("Unable to set motion service pause flag: %s", exc)
+
+    def _resume_teleop(self) -> None:
+        if not self._paused:
+            return
+        logger.info("Teleoperation resumed")
+        self._paused = False
+        if self.motion_service and hasattr(self.motion_service, "paused"):
+            try:
+                self.motion_service.paused = False
+            except Exception as exc:  # pragma: no cover - best effort logging
+                logger.debug("Unable to clear motion service pause flag: %s", exc)
+
+    def _zero_all_joints(self) -> None:
+        logger.info("Gesture requested joint homing")
+        self.stop_all()
+        joint_indices = list(range(6))
+        if self.motion_service and hasattr(self.motion_service, "home_joints"):
+            try:
+                self.motion_service.home_joints(joint_indices)
+                return
+            except Exception as exc:
+                logger.error("Failed to enqueue homing via motion service: %s", exc)
+
+        driver_home = getattr(self.driver, "home_joints", None)
+        if callable(driver_home):
+            try:
+                driver_home(joint_indices)
+            except Exception as exc:
+                logger.error("Driver homing failed: %s", exc)
+        else:
+            logger.warning("Driver does not implement home_joints; zero-all request ignored.")
 
     def stop_all(self):
         """Stop all active teleoperation movements."""

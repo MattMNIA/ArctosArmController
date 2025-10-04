@@ -96,6 +96,32 @@ python app.py --drivers pybullet --teleop finger-sliders
 
 Both finger-based modes scan for available cameras at startup. If more than one camera is detected, you'll be prompted to choose which one to use.
 
+#### Gesture actions (finger sliders)
+
+The finger slider pipeline now recognises high-level gestures to streamline common tasks:
+
+- **Rock & roll** (any hand) &rarr; Zero all joints (homes through the motion service when connected).
+- **Double thumbs down** &rarr; Pause teleoperation and freeze all active velocities.
+- **Double thumbs up** &rarr; Resume teleoperation after a pause.
+
+You can customise these mappings in `backend/config/gestures.yml`.
+
+#### Training your own gestures
+
+Collect samples and retrain the classifier whenever you want to add or adjust gestures:
+
+```bash
+# 1. Record landmarks for each gesture plus a relaxed "neutral" pose
+python scripts/collect_gesture_dataset.py --gestures neutral rock_and_roll thumbs_down thumbs_up --samples 200
+
+# 2. Train the classifier and export it to models/gesture_classifier.joblib
+python scripts/train_gesture_model.py --dataset data/gesture_dataset.csv
+```
+
+Keep the neutral class out of `gestures.yml`; it teaches the classifier what “no gesture” looks like so relaxed hands do not trigger an action. Update the config thresholds if you need an even higher confidence bar.
+
+Edit `backend/config/gestures.yml` to point at the model file and map classifier labels to teleop actions. The backend hot-loads the configuration on startup; restart the teleop process after training to pick up a new model.
+
 ### Setup
 1. Ensure pygame is installed: `pip install pygame`
 2. For Xbox controller, connect via USB or Bluetooth

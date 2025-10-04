@@ -1,11 +1,13 @@
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union, Set, cast
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Set, cast
 
 import cv2
 import mediapipe as mp
 
 from .base_input import InputController
 from .camera_selector import select_camera_index
+from ..vision.gesture_recognizer import GestureRecognizer
 
 
 class FingerSliderInput(InputController):
@@ -54,6 +56,8 @@ class FingerSliderInput(InputController):
         window_name: str = "Finger Slider Input",
         fullscreen: bool = False,
         allow_fullscreen_toggle: bool = True,
+        enable_gestures: bool = True,
+        gesture_config_path: Optional[Union[str, Path]] = None,
     ) -> None:
         selected_index = select_camera_index(camera_index)
         self._camera_index = selected_index
@@ -105,6 +109,10 @@ class FingerSliderInput(InputController):
         self._hand_scale_smoothing = 0.2
         self._min_threshold_scale = 0.6
         self._max_threshold_scale = 1.8
+        self._gesture_recognizer = (
+            GestureRecognizer(gesture_config_path) if enable_gestures else None
+        )
+        self._pending_gesture_events: List[Tuple[str, Union[int, str], float]] = []
 
         if self._show_window:
             cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
@@ -144,6 +152,9 @@ class FingerSliderInput(InputController):
                 )
                 self._joint_state["gripper"] = 0.0
             self._latest_gripper_value = 0.0
+            if self._gesture_recognizer is not None:
+                self._update_gesture_recognizer(None, None, [])
+            events.extend(self._consume_gesture_events())
             return events
 
         for joint in self._joint_indices:
@@ -181,6 +192,8 @@ class FingerSliderInput(InputController):
                 events.append(("press", f"gripper_{curr_dir}", abs(current_gripper)))
 
         self._joint_state["gripper"] = current_gripper
+
+        events.extend(self._consume_gesture_events())
 
         return events
 
@@ -326,6 +339,12 @@ class FingerSliderInput(InputController):
             if key not in active_keys:
                 del self._pinch_states[key]
 
+        self._update_gesture_recognizer(
+            results.multi_hand_landmarks if results else None,
+            results.multi_handedness if results else None,
+            overlay_rows,
+        )
+
         if frame_to_show is not None:
             status_text = f"Overlay [H]: {'ON' if self._hand_overlay_enabled else 'OFF'}"
             status_color = (0, 200, 0) if self._hand_overlay_enabled else (160, 160, 160)
@@ -362,6 +381,34 @@ class FingerSliderInput(InputController):
         self._latest_joint_values = dict(joint_values)
         self._latest_gripper_value = gripper_value
         return joint_values
+
+    def _consume_gesture_events(self) -> List[Tuple[str, Union[int, str], float]]:
+        if not self._pending_gesture_events:
+            return []
+        events = list(self._pending_gesture_events)
+        self._pending_gesture_events = []
+        return events
+
+    def _update_gesture_recognizer(
+        self,
+        multi_hand_landmarks: Optional[Sequence[object]],
+        multi_handedness: Optional[Sequence[object]],
+        overlay_rows: List[str],
+    ) -> None:
+        if self._gesture_recognizer is None:
+            self._pending_gesture_events = []
+            return
+
+        events, overlays = self._gesture_recognizer.process(multi_hand_landmarks, multi_handedness)
+        self._pending_gesture_events = []
+        for event in events:
+            if event.change == "start":
+                self._pending_gesture_events.append(
+                    ("press", event.event, max(event.confidence, 0.0))
+                )
+            elif event.change == "end":
+                self._pending_gesture_events.append(("release", event.event, 0.0))
+        overlay_rows.extend(overlays)
 
     def _apply_smoothing(
         self, joint_index: Union[int, str], target: float, prev_values: Dict[Union[int, str], float]
