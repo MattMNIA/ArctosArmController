@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from pathlib import Path
@@ -46,7 +47,7 @@ class FingerSliderInput(InputController):
         joint_pairs: Optional[Dict[str, Tuple[int, int]]] = None,
         max_num_hands: int = 2,
         detection_confidence: float = 0.7,
-        tracking_confidence: float = 0.7,
+        tracking_confidence: float = 0.6,
         horizontal_gain: float = 2.0,
         vertical_gain: float = 2.0,
         deadzone: float = 0.05,
@@ -61,6 +62,7 @@ class FingerSliderInput(InputController):
         gesture_config_path: Optional[Union[str, Path]] = None,
         min_touch_scale: float = 0.3,
         max_touch_scale: float = 2.0,
+        min_hand_separation: float = 0.12,
     ) -> None:
         selected_index = select_camera_index(camera_index)
         self._camera_index = selected_index
@@ -121,6 +123,7 @@ class FingerSliderInput(InputController):
         self._reference_update_interval = 1.0
         self._reference_update_alpha = 0.35
         self._last_reference_update = 0.0
+        self._min_hand_separation = max(0.0, min_hand_separation)
 
         if self._show_window:
             cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
@@ -236,10 +239,17 @@ class FingerSliderInput(InputController):
         active_keys: Set[Tuple[str, str]] = set()
         overlay_rows: List[str] = []
 
+        filtered_landmarks: Optional[List[Any]] = None
+        filtered_handedness: Optional[List[Any]] = None
+
         if results.multi_hand_landmarks and results.multi_handedness:
-            for hand_landmarks, handedness in zip(
-                results.multi_hand_landmarks, results.multi_handedness
-            ):
+            filtered_landmarks, filtered_handedness = self._filter_overlapping_hands(
+                list(results.multi_hand_landmarks),
+                list(results.multi_handedness),
+            )
+
+        if filtered_landmarks and filtered_handedness:
+            for hand_landmarks, handedness in zip(filtered_landmarks, filtered_handedness):
                 label = handedness.classification[0].label  # 'Left' or 'Right'
                 landmarks = hand_landmarks.landmark
                 thumb_tip = landmarks[4]
@@ -347,11 +357,7 @@ class FingerSliderInput(InputController):
             if key not in active_keys:
                 del self._pinch_states[key]
 
-        self._update_gesture_recognizer(
-            results.multi_hand_landmarks if results else None,
-            results.multi_handedness if results else None,
-            overlay_rows,
-        )
+        self._update_gesture_recognizer(filtered_landmarks, filtered_handedness, overlay_rows)
 
         if frame_to_show is not None:
             status_text = f"Overlay [H]: {'ON' if self._hand_overlay_enabled else 'OFF'}"
@@ -540,6 +546,55 @@ class FingerSliderInput(InputController):
         )
         self._current_update_threshold = (
             (1.0 - alpha) * self._current_update_threshold + alpha * target_update_threshold
+        )
+
+    def _filter_overlapping_hands(
+        self,
+        hand_landmarks_list: Sequence[Any],
+        handedness_list: Sequence[Any],
+    ) -> Tuple[List[Any], List[Any]]:
+        if not hand_landmarks_list or not handedness_list or self._min_hand_separation <= 0.0:
+            return list(hand_landmarks_list), list(handedness_list)
+
+        filtered: List[Dict[str, Any]] = []
+
+        for landmarks_obj, handedness_obj in zip(hand_landmarks_list, handedness_list):
+            if not hasattr(landmarks_obj, "landmark") or not landmarks_obj.landmark:
+                continue
+            wrist = landmarks_obj.landmark[0]
+            score = 0.0
+            try:
+                if handedness_obj.classification:
+                    score = handedness_obj.classification[0].score
+            except AttributeError:
+                score = 0.0
+
+            keep = True
+            for idx, entry in enumerate(filtered):
+                other_wrist = entry["landmarks"].landmark[0]
+                separation = math.hypot(wrist.x - other_wrist.x, wrist.y - other_wrist.y)
+                if separation < self._min_hand_separation:
+                    if score > entry["score"]:
+                        filtered[idx] = {
+                            "landmarks": landmarks_obj,
+                            "handedness": handedness_obj,
+                            "score": score,
+                        }
+                    keep = False
+                    break
+
+            if keep:
+                filtered.append(
+                    {
+                        "landmarks": landmarks_obj,
+                        "handedness": handedness_obj,
+                        "score": score,
+                    }
+                )
+
+        return (
+            [entry["landmarks"] for entry in filtered],
+            [entry["handedness"] for entry in filtered],
         )
 
     @staticmethod
