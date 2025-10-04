@@ -1,14 +1,22 @@
 import math
 import threading
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Set, cast
 
 import cv2
+
+warnings.filterwarnings(
+    "ignore",
+    message="SymbolDatabase.GetPrototype() is deprecated",
+    category=UserWarning,
+)
+
 import mediapipe as mp
 
 from .base_input import InputController
-from ..vision.cameras.camera_selector import select_camera_index
+from ..vision.cameras.local_camera import LocalCamera
 from ..vision.detectors.gesture.gesture_recognizer import GestureRecognizer
 
 
@@ -64,11 +72,8 @@ class FingerSliderInput(InputController):
         max_touch_scale: float = 2.0,
         min_hand_separation: float = 0.12,
     ) -> None:
-        selected_index = select_camera_index(camera_index)
-        self._camera_index = selected_index
-        self._capture = cv2.VideoCapture(selected_index, cv2.CAP_DSHOW)
-        if not self._capture or not self._capture.isOpened():
-            raise RuntimeError(f"Failed to open camera index {selected_index}.")
+        self._camera = LocalCamera(camera_index)
+        self._camera_index = self._camera.camera_index
         self._hands = mp.solutions.hands.Hands(
             max_num_hands=max_num_hands,
             min_detection_confidence=detection_confidence,
@@ -212,8 +217,8 @@ class FingerSliderInput(InputController):
         with self._lock:
             if self._hands:
                 self._hands.close()
-            if self._capture and self._capture.isOpened():
-                self._capture.release()
+            if self._camera and self._camera.is_opened():
+                self._camera.release()
         if self._show_window:
             cv2.destroyWindow(self._window_name)
 
@@ -222,10 +227,10 @@ class FingerSliderInput(InputController):
 
     def _process_frame(self) -> Optional[Dict[int, float]]:
         with self._lock:
-            if not self._capture or not self._capture.isOpened():
+            if not self._camera or not self._camera.is_opened():
                 return None
 
-            ret, frame = self._capture.read()
+            ret, frame = self._camera.read()
             if not ret:
                 return None
 
