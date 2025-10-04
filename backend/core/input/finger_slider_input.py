@@ -8,8 +8,8 @@ import cv2
 import mediapipe as mp
 
 from .base_input import InputController
-from .camera_selector import select_camera_index
-from ..vision.gesture_recognizer import GestureRecognizer
+from ..vision.cameras.camera_selector import select_camera_index
+from ..vision.detectors.gesture.gesture_recognizer import GestureRecognizer
 
 
 class FingerSliderInput(InputController):

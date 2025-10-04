@@ -5,19 +5,23 @@ import math
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Any, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 
 import yaml
 
+if TYPE_CHECKING:  # pragma: no cover - import hints only during type-checking
+    import joblib as joblib_type
+    import numpy as np_type
+
 try:  # Optional heavy dependencies are imported lazily when available
-    import joblib  # type: ignore
+    import joblib
 except ImportError:  # pragma: no cover - handled gracefully at runtime
-    joblib = None  # type: ignore
+    joblib = None  # type: ignore[assignment]
 
 try:  # numpy is optional but useful for ML workflows
-    import numpy as np  # type: ignore
+    import numpy as np
 except ImportError:  # pragma: no cover - handled gracefully at runtime
-    np = None  # type: ignore
+    np = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,7 @@ class GestureEvent:
 
 
 def _default_project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[5]
 
 
 def load_gesture_config(config_path: Optional[Path | str] = None) -> Dict[str, Any]:
@@ -83,7 +87,7 @@ def load_gesture_config(config_path: Optional[Path | str] = None) -> Dict[str, A
         config = {}
 
     model_cfg: Dict[str, Any] = dict(config.get("model", {}) or {})
-    model_cfg.setdefault("path", "models/gesture_classifier.joblib")
+    model_cfg.setdefault("path", "backend/core/vision/detectors/gesture/gesture_classifier.joblib")
     model_cfg.setdefault("probability_threshold", 0.6)
     model_cfg.setdefault("smoothing_window", 5)
     model_cfg.setdefault("min_consensus", max(1, int(model_cfg.get("smoothing_window", 5)) // 2 + 1))

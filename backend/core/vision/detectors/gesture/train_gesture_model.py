@@ -19,11 +19,11 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[5]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.core.vision.gesture_recognizer import load_gesture_config  # noqa: E402
+from gesture_recognizer import load_gesture_config  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

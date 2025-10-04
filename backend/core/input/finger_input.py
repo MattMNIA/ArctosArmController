@@ -4,7 +4,7 @@ import threading
 from typing import Dict, List, Tuple, Union, Any, Optional, cast
 
 from .base_input import InputController
-from .camera_selector import select_camera_index
+from ..vision.cameras.camera_selector import select_camera_index
 
 
 class FingerInput(InputController):

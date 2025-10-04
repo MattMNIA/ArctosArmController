@@ -1,6 +1,6 @@
 # Gesture recognition configuration for finger teleoperation
 model:
-  path: models/gesture_classifier.joblib
+  path: backend/core/vision/detectors/gesture/gesture_classifier.joblib
   probability_threshold: 0.82
   smoothing_window: 7
   min_consensus: 5
