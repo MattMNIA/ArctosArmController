@@ -1,4 +1,5 @@
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Set, cast
 
@@ -41,7 +42,7 @@ class FingerSliderInput(InputController):
     def __init__(
         self,
         camera_index: Optional[int] = None,
-        touch_threshold: float = 0.075,
+    touch_threshold: float = 0.05,
         joint_pairs: Optional[Dict[str, Tuple[int, int]]] = None,
         max_num_hands: int = 2,
         detection_confidence: float = 0.7,
@@ -58,6 +59,8 @@ class FingerSliderInput(InputController):
         allow_fullscreen_toggle: bool = True,
         enable_gestures: bool = True,
         gesture_config_path: Optional[Union[str, Path]] = None,
+        min_touch_scale: float = 0.3,
+        max_touch_scale: float = 2.0,
     ) -> None:
         selected_index = select_camera_index(camera_index)
         self._camera_index = selected_index
@@ -107,12 +110,17 @@ class FingerSliderInput(InputController):
         self._current_scale = 1.0
         self._threshold_smoothing = 0.25
         self._hand_scale_smoothing = 0.2
-        self._min_threshold_scale = 0.6
-        self._max_threshold_scale = 1.8
+        self._min_threshold_scale = max(0.1, min_touch_scale)
+        self._max_threshold_scale = max(self._min_threshold_scale, max_touch_scale)
         self._gesture_recognizer = (
             GestureRecognizer(gesture_config_path) if enable_gestures else None
         )
         self._pending_gesture_events: List[Tuple[str, Union[int, str], float]] = []
+        self._status_message: str = ""
+        self._status_message_until: float = 0.0
+        self._reference_update_interval = 1.0
+        self._reference_update_alpha = 0.35
+        self._last_reference_update = 0.0
 
         if self._show_window:
             cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
@@ -358,11 +366,26 @@ class FingerSliderInput(InputController):
                 1,
                 cv2.LINE_AA,
             )
+            overlay_start_y = 40
+            if self._status_message and time.time() < self._status_message_until:
+                cv2.putText(
+                    frame_to_show,
+                    self._status_message,
+                    (10, overlay_start_y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 200, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+                overlay_start_y += 20
+            elif self._status_message:
+                self._status_message = ""
             for idx, text in enumerate(overlay_rows):
                 cv2.putText(
                     frame_to_show,
                     text,
-                    (10, 40 + idx * 20),
+                    (10, overlay_start_y + idx * 20),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255, 255, 255),
@@ -377,6 +400,16 @@ class FingerSliderInput(InputController):
                 cv2.setWindowProperty(self._window_name, cv2.WND_PROP_FULLSCREEN, target_flag)
             if key in (ord("h"), ord("H")):
                 self._hand_overlay_enabled = not self._hand_overlay_enabled
+            if key in (ord("r"), ord("R")):
+                self._reference_palm_size = None
+                self._current_scale = 1.0
+                self._current_touch_threshold = self._base_touch_threshold
+                self._current_deadzone = self._base_deadzone
+                self._current_update_threshold = self._base_update_threshold
+                self._last_reference_update = 0.0
+                self._status_message = "Recalibrated palm reference"
+                self._status_message_until = time.time() + 2.0
+                self._pinch_states.clear()
 
         self._latest_joint_values = dict(joint_values)
         self._latest_gripper_value = gripper_value
@@ -433,7 +466,7 @@ class FingerSliderInput(InputController):
         return (dx * dx + dy * dy) ** 0.5 < dynamic_threshold
 
     def _get_dynamic_touch_threshold(self, landmarks) -> float:
-        base_span = self._compute_palm_span(landmarks)
+        base_span = self._compute_reference_span(landmarks)
         if base_span <= 0.0:
             return self._base_touch_threshold
 
@@ -450,12 +483,34 @@ class FingerSliderInput(InputController):
         )
         return self._current_touch_threshold
 
+    def _maybe_update_reference(self, base_span: float) -> None:
+        if base_span <= 0.0:
+            return
+
+        now = time.time()
+        if self._reference_palm_size is None or self._reference_palm_size <= 0.0:
+            self._reference_palm_size = base_span
+            self._last_reference_update = now
+            return
+
+        if now - self._last_reference_update < self._reference_update_interval:
+            return
+
+        alpha = min(max(self._reference_update_alpha, 0.0), 1.0)
+        self._reference_palm_size = (
+            (1.0 - alpha) * self._reference_palm_size + alpha * base_span
+        )
+        self._last_reference_update = now
+
     def _update_hand_scale(self, base_span: float) -> float:
         if base_span <= 0.0:
             return self._current_scale
 
+        self._maybe_update_reference(base_span)
+
         if self._reference_palm_size is None or self._reference_palm_size <= 0.0:
             self._reference_palm_size = base_span
+            self._last_reference_update = time.time()
             self._current_scale = 1.0
             return self._current_scale
 
@@ -488,12 +543,19 @@ class FingerSliderInput(InputController):
         )
 
     @staticmethod
-    def _compute_palm_span(landmarks) -> float:
-        base_idx_a = 5
-        base_idx_b = 17
-        dx = landmarks[base_idx_b].x - landmarks[base_idx_a].x
-        dy = landmarks[base_idx_b].y - landmarks[base_idx_a].y
-        return (dx * dx + dy * dy) ** 0.5
+    def _compute_reference_span(landmarks) -> float:
+        wrist = landmarks[0]
+        mcp_indices = (5, 9, 13, 17)
+        distances: List[float] = []
+        wx, wy = wrist.x, wrist.y
+        for idx in mcp_indices:
+            pt = landmarks[idx]
+            dx = pt.x - wx
+            dy = pt.y - wy
+            distances.append((dx * dx + dy * dy) ** 0.5)
+        if not distances:
+            return 0.0
+        return sum(distances) / len(distances)
 
     def _draw_slider_overlay(
         self,

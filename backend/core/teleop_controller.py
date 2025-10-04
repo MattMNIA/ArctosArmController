@@ -16,6 +16,7 @@ class DriverProtocol(Protocol):
 
 # Import InputController here to avoid circular imports
 from .input.base_input import InputController
+from .motion_service import JointCommand
 #TODO Test new teleop controller and motion service integration
 logger = logging.getLogger(__name__)
 class TeleopController:
@@ -130,7 +131,10 @@ class TeleopController:
             return True
         if token == "zero_all_joints":
             if event_type == 'press':
-                self._zero_all_joints()
+                if self._paused:
+                    logger.info("Teleoperation paused; ignoring zero-all request")
+                else:
+                    self._zero_all_joints()
             return True
         return False
 
@@ -158,24 +162,22 @@ class TeleopController:
                 logger.debug("Unable to clear motion service pause flag: %s", exc)
 
     def _zero_all_joints(self) -> None:
-        logger.info("Gesture requested joint homing")
+        logger.info("Gesture requested zeroing joints to [0, 0, 0, 0, 0, 0]")
         self.stop_all()
-        joint_indices = list(range(6))
-        if self.motion_service and hasattr(self.motion_service, "home_joints"):
+        zero_targets = [0.0] * 6
+
+        if self.motion_service and hasattr(self.motion_service, "enqueue"):
             try:
-                self.motion_service.home_joints(joint_indices)
+                cmd = JointCommand(q=zero_targets, duration_s=2.0)
+                self.motion_service.enqueue(cmd)
                 return
             except Exception as exc:
-                logger.error("Failed to enqueue homing via motion service: %s", exc)
+                logger.error("Failed to enqueue zero command via motion service: %s", exc)
 
-        driver_home = getattr(self.driver, "home_joints", None)
-        if callable(driver_home):
-            try:
-                driver_home(joint_indices)
-            except Exception as exc:
-                logger.error("Driver homing failed: %s", exc)
-        else:
-            logger.warning("Driver does not implement home_joints; zero-all request ignored.")
+        try:
+            self.driver.send_joint_targets(zero_targets)
+        except Exception as exc:
+            logger.error("Driver failed to move joints to zero: %s", exc)
 
     def stop_all(self):
         """Stop all active teleoperation movements."""

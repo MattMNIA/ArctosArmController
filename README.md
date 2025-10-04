@@ -87,6 +87,7 @@ Pinch the thumb and a finger, then move while holding the pinch to command two j
 - **Thumb + Pinky**: Vertical motion opens/closes the gripper (up = open, down = close)
 
 Grip is re-centered each time you release and re-pin. Movements are smoothed and accept subtle adjustments.
+The preview automatically refreshes its wrist-based reference about once per second; press `R` at any time to force an immediate recalibration if you change your working distance.
 
 Start with:
 
@@ -100,7 +101,7 @@ Both finger-based modes scan for available cameras at startup. If more than one 
 
 The finger slider pipeline now recognises high-level gestures to streamline common tasks:
 
-- **Rock & roll** (any hand) &rarr; Zero all joints (homes through the motion service when connected).
+- **Rock & roll** (any hand) &rarr; Zero all joints (sends them to `[0,0,0,0,0,0]`).
 - **Double thumbs down** &rarr; Pause teleoperation and freeze all active velocities.
 - **Double thumbs up** &rarr; Resume teleoperation after a pause.
 
