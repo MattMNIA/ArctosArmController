@@ -56,8 +56,9 @@ class FingerSliderStrategy:
         window_name: str = "Finger Slider Input",
         fullscreen: bool = False,
         allow_fullscreen_toggle: bool = True,
-        enable_gestures: bool = True,
-        gesture_config_path: Optional[Union[str, Path]] = None,
+    enable_gestures: bool = True,
+    gesture_config_path: Optional[Union[str, Path]] = None,
+    gesture_update_interval: float = 0.1,
         min_touch_scale: float = 0.3,
         max_touch_scale: float = 2.0,
         min_hand_separation: float = 0.12,
@@ -113,6 +114,9 @@ class FingerSliderStrategy:
             GestureRecognizer(gesture_config_path) if enable_gestures else None
         )
         self._pending_gesture_events: List[Tuple[str, Union[int, str], float]] = []
+        self._gesture_update_interval = max(0.0, gesture_update_interval)
+        self._last_gesture_update = 0.0
+        self._last_gesture_overlays: List[str] = []
         self._status_message: str = ""
         self._status_message_until: float = 0.0
         self._reference_update_interval = 1.0
@@ -436,6 +440,15 @@ class FingerSliderStrategy:
     ) -> None:
         if self._gesture_recognizer is None:
             self._pending_gesture_events = []
+            self._last_gesture_overlays = []
+            return
+
+        now = time.time()
+        if (
+            self._gesture_update_interval > 0.0
+            and now - self._last_gesture_update < self._gesture_update_interval
+        ):
+            overlay_rows.extend(self._last_gesture_overlays)
             return
 
         events, overlays = self._gesture_recognizer.process(multi_hand_landmarks, multi_handedness)
@@ -448,6 +461,8 @@ class FingerSliderStrategy:
             elif event.change == "end":
                 self._pending_gesture_events.append(("release", event.event, 0.0))
         overlay_rows.extend(overlays)
+        self._last_gesture_overlays = list(overlays)
+        self._last_gesture_update = now
 
     def _apply_smoothing(
         self, joint_index: Union[int, str], target: float, prev_values: Dict[Union[int, str], float]

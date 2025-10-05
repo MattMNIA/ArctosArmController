@@ -34,6 +34,7 @@ class FingerSliderInput(InputController):
         min_touch_scale: float = 0.3,
         max_touch_scale: float = 2.0,
         min_hand_separation: float = 0.12,
+        gesture_update_interval: float = 0.1,
     ) -> None:
         self._strategy = FingerSliderStrategy(
             camera_index=camera_index,
@@ -57,6 +58,7 @@ class FingerSliderInput(InputController):
             min_touch_scale=min_touch_scale,
             max_touch_scale=max_touch_scale,
             min_hand_separation=min_hand_separation,
+            gesture_update_interval=gesture_update_interval,
         )
 
     @property
