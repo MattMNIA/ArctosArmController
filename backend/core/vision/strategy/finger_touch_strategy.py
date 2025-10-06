@@ -1,15 +1,7 @@
 import threading
-import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import cv2
-import warnings
-warnings.filterwarnings(
-    "ignore",
-    message="SymbolDatabase.GetPrototype() is deprecated",
-    category=UserWarning
-)
-
 import mediapipe as mp
 
 from ..cameras.local_camera import LocalCamera

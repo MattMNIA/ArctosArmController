@@ -6,13 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import cv2
-
-warnings.filterwarnings(
-    "ignore",
-    message="SymbolDatabase.GetPrototype() is deprecated",
-    category=UserWarning,
-)
-
 import mediapipe as mp
 
 from ..cameras.local_camera import LocalCamera

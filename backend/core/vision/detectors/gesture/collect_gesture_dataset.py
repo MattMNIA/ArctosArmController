@@ -8,12 +8,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import cv2
-import warnings
-warnings.filterwarnings(
-    "ignore",
-    message="SymbolDatabase.GetPrototype() is deprecated",
-    category=UserWarning
-)
 import mediapipe as mp
 
 # Allow importing from the project without installing as a package

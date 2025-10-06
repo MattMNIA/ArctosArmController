@@ -7,12 +7,6 @@ from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 import cv2
-import warnings
-warnings.filterwarnings(
-    "ignore",
-    message="SymbolDatabase.GetPrototype() is deprecated",
-    category=UserWarning
-)
 import mediapipe as mp
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
