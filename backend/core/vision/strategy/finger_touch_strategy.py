@@ -3,11 +3,11 @@ import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import cv2
-
+import warnings
 warnings.filterwarnings(
     "ignore",
     message="SymbolDatabase.GetPrototype() is deprecated",
-    category=UserWarning,
+    category=UserWarning
 )
 
 import mediapipe as mp
@@ -31,11 +31,13 @@ class FingerTouchStrategy:
         "ring": 2,
         "pinky": 3,
     }
+    DEFAULT_REFERENCE_SPAN: float = 0.2
 
     def __init__(
         self,
         camera_index: Optional[int] = None,
         touch_threshold: float = 0.05,
+        touch_ratio: Optional[float] = None,
         joint_map: Optional[Dict[str, int]] = None,
         max_num_hands: int = 2,
         detection_confidence: float = 0.7,
@@ -55,7 +57,11 @@ class FingerTouchStrategy:
         )
         self._joint_map = joint_map or self.DEFAULT_JOINT_MAP
         self._touch_threshold = touch_threshold
-        self._base_touch_threshold = touch_threshold
+        self._touch_ratio = touch_ratio if touch_ratio is not None else (
+            touch_threshold / self.DEFAULT_REFERENCE_SPAN
+        )
+        self._touch_ratio = max(1e-6, float(self._touch_ratio))
+        self._base_touch_threshold = self._touch_ratio * self.DEFAULT_REFERENCE_SPAN
         self._scale = scale
         self._last_gestures = cast(Dict[str, Optional[str]], {"Left": None, "Right": None})
         self._lock = threading.Lock()
@@ -64,9 +70,8 @@ class FingerTouchStrategy:
         self._allow_fullscreen_toggle = allow_fullscreen_toggle and show_window
         self._drawing_utils = mp.solutions.drawing_utils
         self._hand_overlay_enabled = False
-        self._reference_palm_size: Optional[float] = None
-        self._current_touch_threshold = touch_threshold
-        self._current_scale = 1.0
+        self._current_touch_threshold = self._base_touch_threshold
+        self._current_hand_span = self.DEFAULT_REFERENCE_SPAN
         self._threshold_smoothing = 0.25
         self._hand_scale_smoothing = 0.2
         self._min_threshold_scale = 0.6
@@ -151,6 +156,10 @@ class FingerTouchStrategy:
             ):
                 label = handedness.classification[0].label  # 'Left' or 'Right'
                 landmarks = hand_landmarks.landmark
+                thumb_tip = landmarks[4]
+                dynamic_threshold = self._get_dynamic_touch_threshold(landmarks)
+                if frame_to_show is not None:
+                    self._draw_touch_threshold_circle(frame_to_show, thumb_tip, dynamic_threshold)
                 if frame_to_show is not None and self._hand_overlay_enabled:
                     self._drawing_utils.draw_landmarks(
                         frame_to_show,
@@ -158,7 +167,9 @@ class FingerTouchStrategy:
                         mp.solutions.hands.HAND_CONNECTIONS,
                     )
                 for finger, tip_idx in self.FINGER_TIPS.items():
-                    touching = self._fingers_touching(landmarks, 4, tip_idx)
+                    touching = self._fingers_touching(
+                        landmarks, 4, tip_idx, dynamic_threshold
+                    )
                     if touching:
                         gestures[label] = finger
                     if frame_to_show is not None:
@@ -190,48 +201,52 @@ class FingerTouchStrategy:
 
         return gestures
 
-    def _fingers_touching(self, landmarks, idx1: int, idx2: int) -> bool:
+    def _fingers_touching(
+        self,
+        landmarks,
+        idx1: int,
+        idx2: int,
+        dynamic_threshold: Optional[float] = None,
+    ) -> bool:
         dx = landmarks[idx2].x - landmarks[idx1].x
         dy = landmarks[idx2].y - landmarks[idx1].y
-        dynamic_threshold = self._get_dynamic_touch_threshold(landmarks)
+        if dynamic_threshold is None:
+            dynamic_threshold = self._get_dynamic_touch_threshold(landmarks)
         return (dx * dx + dy * dy) ** 0.5 < dynamic_threshold
 
     def _get_dynamic_touch_threshold(self, landmarks) -> float:
         base_span = self._compute_palm_span(landmarks)
         if base_span <= 0.0:
-            return self._base_touch_threshold
+            return self._current_touch_threshold
 
-        scale = self._update_hand_scale(base_span)
-        target = self._base_touch_threshold * scale
+        span = self._update_hand_span(base_span)
+        unclamped_threshold = self._touch_ratio * span
+        min_threshold = self._base_touch_threshold * self._min_threshold_scale
+        max_threshold = self._base_touch_threshold * self._max_threshold_scale
+        target = max(min_threshold, min(max_threshold, unclamped_threshold))
+
         if self._threshold_smoothing <= 0.0:
             self._current_touch_threshold = target
-            return target
-
-        alpha = min(max(self._threshold_smoothing, 0.0), 1.0)
-        self._current_touch_threshold = (
-            (1.0 - alpha) * self._current_touch_threshold + alpha * target
-        )
+        else:
+            alpha = min(max(self._threshold_smoothing, 0.0), 1.0)
+            self._current_touch_threshold = (
+                (1.0 - alpha) * self._current_touch_threshold + alpha * target
+            )
         return self._current_touch_threshold
 
-    def _update_hand_scale(self, base_span: float) -> float:
+    def _update_hand_span(self, base_span: float) -> float:
         if base_span <= 0.0:
-            return self._current_scale
-
-        if self._reference_palm_size is None or self._reference_palm_size <= 0.0:
-            self._reference_palm_size = base_span
-            self._current_scale = 1.0
-            return self._current_scale
-
-        target_scale = base_span / self._reference_palm_size
-        target_scale = max(self._min_threshold_scale, min(self._max_threshold_scale, target_scale))
+            return self._current_hand_span
 
         if self._hand_scale_smoothing <= 0.0:
-            self._current_scale = target_scale
-            return self._current_scale
+            self._current_hand_span = base_span
+            return self._current_hand_span
 
         alpha = min(max(self._hand_scale_smoothing, 0.0), 1.0)
-        self._current_scale = (1.0 - alpha) * self._current_scale + alpha * target_scale
-        return self._current_scale
+        self._current_hand_span = (
+            (1.0 - alpha) * self._current_hand_span + alpha * base_span
+        )
+        return self._current_hand_span
 
     @staticmethod
     def _compute_palm_span(landmarks) -> float:
@@ -260,3 +275,14 @@ class FingerTouchStrategy:
         cv2.circle(frame, thumb_pt, 6, (0, 128, 255), 2)
         cv2.circle(frame, finger_pt, 8, color, 2)
         cv2.line(frame, thumb_pt, finger_pt, color, 2)
+
+    def _draw_touch_threshold_circle(self, frame, thumb_tip, threshold: float) -> None:
+        if threshold <= 0.0:
+            return
+
+        h, w, _ = frame.shape
+        cx = int(max(0.0, min(1.0, thumb_tip.x)) * w)
+        cy = int(max(0.0, min(1.0, thumb_tip.y)) * h)
+        avg_extent = 0.5 * (w + h)
+        radius = int(max(2.0, min(threshold * avg_extent, float(max(w, h)))))
+        cv2.circle(frame, (cx, cy), radius, (255, 200, 0), 1, lineType=cv2.LINE_AA)

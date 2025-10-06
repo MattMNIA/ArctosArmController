@@ -1,4 +1,10 @@
-# app.py
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"SymbolDatabase\.GetPrototype\(\).*deprecated",
+    category=UserWarning
+)
 from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit

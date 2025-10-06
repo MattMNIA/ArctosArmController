@@ -15,6 +15,7 @@ class FingerSliderInput(InputController):
         self,
         camera_index: Optional[int] = None,
         touch_threshold: float = 0.05,
+        touch_ratio: Optional[float] = None,
         joint_pairs: Optional[Dict[str, Tuple[int, int]]] = None,
         max_num_hands: int = 2,
         detection_confidence: float = 0.7,
@@ -39,6 +40,7 @@ class FingerSliderInput(InputController):
         self._strategy = FingerSliderStrategy(
             camera_index=camera_index,
             touch_threshold=touch_threshold,
+            touch_ratio=touch_ratio,
             joint_pairs=joint_pairs,
             max_num_hands=max_num_hands,
             detection_confidence=detection_confidence,
