@@ -110,7 +110,7 @@ if __name__ == "__main__":
         elif teleop_mode == 'fingers':
             input_controller = FingerInputController()
         elif teleop_mode == 'finger-sliders':
-            input_controller = FingerSliderInput()
+            input_controller = FingerSliderInput(gesture_update_interval=0.1)  # ~33 Hz
         else:
             input_controller = KeyboardController()
         
