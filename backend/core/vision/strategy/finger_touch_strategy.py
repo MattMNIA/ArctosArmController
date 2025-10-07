@@ -23,7 +23,7 @@ class FingerTouchStrategy:
         "ring": 2,
         "pinky": 3,
     }
-    DEFAULT_REFERENCE_SPAN: float = 0.2
+    DEFAULT_REFERENCE_SPAN: float = 0.175
 
     def __init__(
         self,

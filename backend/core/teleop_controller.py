@@ -17,7 +17,6 @@ class DriverProtocol(Protocol):
 # Import InputController here to avoid circular imports
 from .input.base_input import InputController
 from .motion_service import JointCommand
-#TODO Test new teleop controller and motion service integration
 logger = logging.getLogger(__name__)
 class TeleopController:
     """
@@ -38,7 +37,7 @@ class TeleopController:
         self.last_gripper_update = 0  # Track time of last gripper update
         self.velocity_refresh_interval = 0.5  # seconds between keep-alive commands
         self._last_velocity_command: Dict[int, float] = {}
-        self._paused = False
+        self._paused = True
 
     def teleop_step(self):
         """

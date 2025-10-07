@@ -9,7 +9,7 @@ from typing import Optional, Sequence, Tuple
 import cv2
 import mediapipe as mp
 
-PROJECT_ROOT = Path(__file__).resolve().parents[5]
+PROJECT_ROOT = Path(__file__).resolve().parents[0]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=PROJECT_ROOT / "backend" / "config" / "gestures.yml",
+        default=PROJECT_ROOT / "gestures.yml",
         help="Path to gestures.yml config (default uses repo config)",
     )
     parser.add_argument(

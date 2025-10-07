@@ -63,7 +63,7 @@ class GestureEvent:
 
 
 def _default_project_root() -> Path:
-    return Path(__file__).resolve().parents[5]
+    return Path(__file__).resolve().parents[0]
 
 
 def load_gesture_config(config_path: Optional[Path | str] = None) -> Dict[str, Any]:
@@ -73,7 +73,7 @@ def load_gesture_config(config_path: Optional[Path | str] = None) -> Dict[str, A
     candidate = (
         Path(config_path)
         if config_path
-        else project_root / "backend" / "config" / "gestures.yml"
+        else project_root / "gestures.yml"
     )
     if not candidate.is_absolute():
         candidate = (project_root / candidate).resolve()
@@ -87,7 +87,7 @@ def load_gesture_config(config_path: Optional[Path | str] = None) -> Dict[str, A
         config = {}
 
     model_cfg: Dict[str, Any] = dict(config.get("model", {}) or {})
-    model_cfg.setdefault("path", "backend/core/vision/detectors/gesture/gesture_classifier.joblib")
+    model_cfg.setdefault("path", "models/gesture_classifier.joblib")
     model_cfg.setdefault("probability_threshold", 0.6)
     model_cfg.setdefault("smoothing_window", 5)
     model_cfg.setdefault("min_consensus", max(1, int(model_cfg.get("smoothing_window", 5)) // 2 + 1))

@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import cv2
+
 import mediapipe as mp
 
 # Allow importing from the project without installing as a package
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[0]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -66,7 +67,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--append",
         action="store_true",
-        help="Append to the existing dataset instead of overwriting it.",
+        default=True,
+        help="Append to the existing dataset instead of overwriting it. (default: True)",
     )
     parser.add_argument(
         "--max-hands",

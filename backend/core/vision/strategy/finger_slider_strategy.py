@@ -30,7 +30,7 @@ class FingerSliderStrategy:
 
     INVERTED_VERTICAL_JOINTS = {2}
     INVERTED_HORIZONTAL_JOINTS = {3, 5}
-    DEFAULT_REFERENCE_SPAN: float = 0.2
+    DEFAULT_REFERENCE_SPAN: float = 0.175
 
     def __init__(
         self,
@@ -163,7 +163,8 @@ class FingerSliderStrategy:
             self._latest_gripper_value = 0.0
             if self._gesture_recognizer is not None:
                 self._update_gesture_recognizer(None, None, [])
-            events.extend(self._consume_gesture_events())
+            gesture_events = self._consume_gesture_events()
+            events.extend(gesture_events)
             return events
 
         for joint in self._joint_indices:

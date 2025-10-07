@@ -19,7 +19,7 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-PROJECT_ROOT = Path(__file__).resolve().parents[5]
+PROJECT_ROOT = Path(__file__).resolve().parents[0]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=PROJECT_ROOT / "backend" / "config" / "gestures.yml",
+        default=PROJECT_ROOT / "gestures.yml",
         help="Gesture config file to embed into model metadata",
     )
     return parser.parse_args()
