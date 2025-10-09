@@ -1,4 +1,5 @@
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import cv2
@@ -68,6 +69,9 @@ class FingerTouchStrategy:
         self._hand_scale_smoothing = 0.2
         self._min_threshold_scale = 0.6
         self._max_threshold_scale = 1.8
+        self._teleop_mode: str = "paused"
+        self._teleop_mode_previous: str = "paused"
+        self._teleop_mode_timer: Optional[float] = None
 
         if self._show_window:
             cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
@@ -112,6 +116,28 @@ class FingerTouchStrategy:
             self._last_gestures[hand] = current
 
         return events
+
+    def set_teleop_mode(self, mode: str, *, hold_for: Optional[float] = None) -> None:
+        normalized = (mode or "").strip().lower() or "paused"
+        if normalized not in {"paused", "active", "zeroing"}:
+            normalized = "paused"
+        with self._lock:
+            if hold_for and hold_for > 0:
+                if normalized != self._teleop_mode:
+                    self._teleop_mode_previous = self._teleop_mode
+                self._teleop_mode = normalized
+                self._teleop_mode_timer = time.time() + hold_for
+            else:
+                self._teleop_mode = normalized
+                self._teleop_mode_previous = normalized
+                self._teleop_mode_timer = None
+
+    def _get_display_mode(self) -> str:
+        with self._lock:
+            if self._teleop_mode_timer and time.time() > self._teleop_mode_timer:
+                self._teleop_mode = self._teleop_mode_previous
+                self._teleop_mode_timer = None
+            return self._teleop_mode
 
     def close(self) -> None:
         with self._lock:
@@ -180,6 +206,23 @@ class FingerTouchStrategy:
                 0.5,
                 status_color,
                 1,
+                cv2.LINE_AA,
+            )
+
+            mode_text = self._get_display_mode().upper()
+            mode_color_map = {
+                "PAUSED": (0, 165, 255),
+                "ACTIVE": (0, 255, 0),
+                "ZEROING": (0, 200, 255),
+            }
+            cv2.putText(
+                frame_to_show,
+                f"Mode: {mode_text}",
+                (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                mode_color_map.get(mode_text, (255, 255, 255)),
+                2 if mode_text == "ZEROING" else 1,
                 cv2.LINE_AA,
             )
             cv2.imshow(self._window_name, frame_to_show)

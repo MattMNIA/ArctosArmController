@@ -222,11 +222,6 @@ class CanDriver():
                 motor_angles[5] = -q4 + q5  # Motor 5 (changed from q4 - q5)
                 break  # Only need to do this once for both joints
         
-        # Apply direction inversion for joints 1, 2, 4, 5 (motors 1, 2, 4, 5)
-        for motor_id in motor_angles:
-            if motor_id in [1, 2, 4, 5]:
-                motor_angles[motor_id] = -motor_angles[motor_id]
-        
         return motor_angles
 
     def joint_velocity_to_motors(self, joint_index: int, scale: float) -> Dict[int, float]:
@@ -259,11 +254,6 @@ class CanDriver():
             motor_scales = {4: scale, 5: scale}
         else:
             motor_scales = {}
-        
-        # Apply direction inversion for joints 1, 2, 4, 5 (motors 1, 2, 4, 5)
-        for motor_id in motor_scales:
-            if motor_id in [1, 2, 4, 5]:
-                motor_scales[motor_id] = -motor_scales[motor_id]
         
         return motor_scales
 
@@ -636,7 +626,7 @@ class CanDriver():
             # Apply homing offset if configured
             homing_offset = motor_config.get("homing_offset", 0)
             if homing_offset != 0:
-                offset_speed = motor_config.get("offset_speed", 50)
+                offset_speed = abs(motor_config.get("offset_speed", 50))
                 logger.info(f"Applying homing offset {homing_offset} to joint {joint_idx}")
                 servo.run_motor_relative_motion_by_axis(offset_speed, 150, int(homing_offset))
                 while servo.is_motor_running():
@@ -685,8 +675,8 @@ class CanDriver():
         logger.info(f"offset5: {offset5}")
         
         # Get homing speeds and directions from motor configs
-        offset_speed5 = config5.get("offset_speed", 80)
-        offset_speed6 = config6.get("offset_speed", 80)
+        offset_speed5 = abs(config5.get("offset_speed", 80))
+        offset_speed6 = abs(config6.get("offset_speed", 80))
         home_speed5 = config5.get("home_speed", 80)
         home_speed6 = config6.get("home_speed", 80)
         home_dir_5 = config5.get("home_direction", "CCW")
@@ -772,8 +762,8 @@ class CanDriver():
         offset6 = config6.get("homing_offset", 20000)
         
         # Get homing speeds and directions from motor configs
-        offset_speed5 = config5.get("offset_speed", 80)
-        offset_speed6 = config6.get("offset_speed", 80)
+        offset_speed5 = abs(config5.get("offset_speed", 80))
+        offset_speed6 = abs(config6.get("offset_speed", 80))
         home_speed5 = config5.get("home_speed", 80)
         home_speed6 = config6.get("home_speed", 80)
         home_dir_6 = config6.get("home_direction", "CCW")
@@ -923,7 +913,7 @@ class CanDriver():
                     
                     # Get motor-specific speed and acceleration
                     motor_config = self.get_motor_config(motor_id)
-                    speed = motor_config['speed_rpm']
+                    speed = abs(motor_config['speed_rpm'])
                     acc = motor_config['acceleration']
                     
                     result = self.servos[motor_id].run_motor_absolute_motion_by_axis(
@@ -1082,11 +1072,6 @@ class CanDriver():
                 angle_rad = self.encoder_to_angle(encoder_value, i)
                 motor_angles.append(angle_rad)
             
-            # Apply direction inversion for joints 1, 2, 4, 5 (motors 1, 2, 4, 5)
-            for i in range(len(motor_angles)):
-                if i in [1, 2, 4, 5]:
-                    motor_angles[i] = -motor_angles[i]
-            
             # Convert motor angles to joint angles for coupled mode
             coupled_mode = self.config_manager.get('joints.coupled_mode', False)
             if coupled_mode and len(motor_angles) >= 6:
@@ -1106,8 +1091,6 @@ class CanDriver():
             for i, servo in enumerate(self.servos):
                 try:
                     speed = servo.read_motor_speed()
-                    if speed is not None and i in [1, 2, 4, 5]:
-                        speed = -speed
                     dq.append(speed if speed is not None else 0.0)
                 except Exception as e:
                     logger.warning(f"Error reading speed for servo {i}: {e}")

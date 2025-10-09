@@ -5,7 +5,7 @@ import math
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Any, Deque, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, cast
 
 import yaml
 
@@ -255,6 +255,9 @@ class MLGestureClassifier(BaseGestureClassifier):
         except KeyError as exc:  # pragma: no cover - guard for unexpected payloads
             raise ValueError("Invalid gesture model payload") from exc
 
+        self.model_path: Path = model_path
+        self.metadata: Dict[str, Any] = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+
         if np is None:
             logger.warning("numpy not available – falling back to Python lists for predictions")
 
@@ -270,14 +273,67 @@ class MLGestureClassifier(BaseGestureClassifier):
         label = self._label_encoder.inverse_transform([encoded_class])[0]
         return str(label), float(proba_values[best_index])
 
+    def predict_proba(self, feature_matrix: Sequence[Sequence[float]]):
+        return self._classifier.predict_proba(feature_matrix)
+
+    @property
+    def classes_(self):
+        return self._classifier.classes_
+
+
+def _resolve_model_reference(reference: Union[str, Path]) -> Optional[Path]:
+    candidate = Path(reference)
+    if not candidate.suffix:
+        models_dir = _default_project_root() / "models"
+        if not models_dir.exists():
+            return None
+        alias = str(reference).lower()
+        try:
+            ranked = sorted(
+                (p for p in models_dir.glob("*.joblib") if alias in p.stem.lower()),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return None
+        if ranked:
+            return ranked[0].resolve()
+        return None
+
+    if not candidate.is_absolute():
+        candidate = (_default_project_root() / candidate).resolve()
+    return candidate if candidate.exists() else None
+
 
 class GestureRecognizer:
     """High-level gesture recognizer that wraps classification + gesture actions."""
 
-    def __init__(self, config_path: Optional[Path | str] = None):
+    def __init__(
+        self,
+        config_path: Optional[Path | str] = None,
+        *,
+        model: Optional[Union[str, Path]] = None,
+        model_overrides: Optional[Mapping[str, Any]] = None,
+    ):
         self._config = load_gesture_config(config_path)
         model_cfg_raw = self._config.get("model", {})
-        model_cfg = cast(Dict[str, Any], model_cfg_raw)
+        model_cfg = dict(cast(Dict[str, Any], model_cfg_raw))
+
+        effective_overrides: Dict[str, Any] = {}
+        if model is not None:
+            resolved = _resolve_model_reference(model)
+            if resolved is None:
+                logger.warning("Gesture model override '%s' could not be resolved.", model)
+            else:
+                effective_overrides["path"] = str(resolved)
+
+        if model_overrides:
+            for key, value in model_overrides.items():
+                if value is not None:
+                    effective_overrides[str(key)] = value
+
+        for key, value in effective_overrides.items():
+            model_cfg[str(key)] = value
 
         self._probability_threshold: float = float(model_cfg.get("probability_threshold", 0.6))
         self._smoothing_window: int = max(1, int(model_cfg.get("smoothing_window", 5)))
@@ -307,6 +363,9 @@ class GestureRecognizer:
             logger.error("Failed to load gesture classifier: %s", exc)
 
         self._classifier = classifier
+        self._label_encoder = getattr(classifier, "_label_encoder", None) if classifier else None
+        self._model_metadata: Dict[str, Any] = getattr(classifier, "metadata", {}) if classifier else {}
+        self._model_path: Optional[Path] = getattr(classifier, "model_path", model_path)
 
         gestures_raw = self._config.get("gestures", [])
         gesture_list: List[Dict[str, Any]] = (
@@ -352,6 +411,14 @@ class GestureRecognizer:
     @property
     def label_encoder(self):
         return getattr(self, "_label_encoder", None)
+
+    @property
+    def model_metadata(self) -> Dict[str, Any]:
+        return dict(self._model_metadata)
+
+    @property
+    def model_path(self) -> Optional[Path]:
+        return self._model_path
 
     def reset(self) -> None:
         self._hand_history.clear()

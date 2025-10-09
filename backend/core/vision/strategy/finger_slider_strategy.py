@@ -28,8 +28,8 @@ class FingerSliderStrategy:
         "ring": (5, 4),
     }
 
-    INVERTED_VERTICAL_JOINTS = {2}
-    INVERTED_HORIZONTAL_JOINTS = {3, 5}
+    INVERTED_VERTICAL_JOINTS = {}
+    INVERTED_HORIZONTAL_JOINTS = {}
     DEFAULT_REFERENCE_SPAN: float = 0.175
 
     def __init__(
@@ -108,16 +108,24 @@ class FingerSliderStrategy:
         self._hand_scale_smoothing = 0.2
         self._min_threshold_scale = max(0.1, min_touch_scale)
         self._max_threshold_scale = max(self._min_threshold_scale, max_touch_scale)
-        self._gesture_recognizer = (
-            GestureRecognizer(gesture_config_path) if enable_gestures else None
-        )
+        self._gesture_recognizer = None
+        if enable_gestures:
+            self._gesture_recognizer = GestureRecognizer(gesture_config_path, model="mlp")
         self._pending_gesture_events: List[Tuple[str, Union[int, str], float]] = []
         self._gesture_update_interval = max(0.0, gesture_update_interval)
         self._last_gesture_update = 0.0
         self._last_gesture_overlays: List[str] = []
         self._status_message: str = ""
         self._status_message_until: float = 0.0
+        if self._gesture_recognizer is not None and self._gesture_recognizer.enabled:
+            model_path = self._gesture_recognizer.model_path
+            if model_path is not None:
+                self._status_message = f"Using gesture model: {model_path.name}"
+                self._status_message_until = time.time() + 3.0
         self._min_hand_separation = max(0.0, min_hand_separation)
+        self._teleop_mode: str = "paused"
+        self._teleop_mode_previous: str = "paused"
+        self._teleop_mode_timer: Optional[float] = None
 
         if self._show_window:
             cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
@@ -131,6 +139,29 @@ class FingerSliderStrategy:
     @property
     def camera_index(self) -> int:
         return self._camera_index
+
+    def set_teleop_mode(self, mode: str, *, hold_for: Optional[float] = None) -> None:
+        normalized = (mode or "").strip().lower()
+        if normalized not in {"paused", "active", "zeroing"}:
+            normalized = mode.lower() if mode else "paused"
+        with self._lock:
+            if hold_for and hold_for > 0:
+                if normalized != self._teleop_mode:
+                    self._teleop_mode_previous = self._teleop_mode
+                self._teleop_mode = normalized
+                self._teleop_mode_timer = time.time() + hold_for
+            else:
+                self._teleop_mode = normalized
+                self._teleop_mode_previous = normalized
+                self._teleop_mode_timer = None
+
+    def _get_display_mode(self) -> str:
+        with self._lock:
+            if self._teleop_mode_timer and time.time() > self._teleop_mode_timer:
+                self._teleop_mode = self._teleop_mode_previous
+                self._teleop_mode_timer = None
+            return self._teleop_mode
+
 
     def get_commands(self) -> Dict[Union[int, str], float]:
         commands = cast(
@@ -379,7 +410,25 @@ class FingerSliderStrategy:
                 1,
                 cv2.LINE_AA,
             )
-            overlay_start_y = 40
+
+            mode_text = self._get_display_mode().upper()
+            mode_color_map = {
+                "PAUSED": (0, 165, 255),
+                "ACTIVE": (0, 255, 0),
+                "ZEROING": (0, 200, 255),
+            }
+            cv2.putText(
+                frame_to_show,
+                f"Mode: {mode_text}",
+                (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                mode_color_map.get(mode_text, (255, 255, 255)),
+                2 if mode_text == "ZEROING" else 1,
+                cv2.LINE_AA,
+            )
+
+            overlay_start_y = 60
             if self._status_message and time.time() < self._status_message_until:
                 cv2.putText(
                     frame_to_show,

@@ -73,8 +73,12 @@ export default function MotorConfig() {
       motors.forEach(motor => {
         const original = originalMotors.find(o => o.id === motor.id);
         if (original) {
-          if (motor.speed_rpm !== original.speed_rpm) {
-            promises.push(updateMotor(motor.id, 'speed_rpm', motor.speed_rpm));
+          const originalSpeed = original.speed_rpm;
+          const originalSpeedSign = originalSpeed === 0 ? 1 : Math.sign(originalSpeed);
+          const currentSpeed = motor.speed_rpm;
+          if (Math.abs(currentSpeed) !== Math.abs(originalSpeed)) {
+            const signedSpeed = originalSpeedSign * Math.abs(currentSpeed);
+            promises.push(updateMotor(motor.id, 'speed_rpm', signedSpeed));
           }
           if (motor.acceleration !== original.acceleration) {
             promises.push(updateMotor(motor.id, 'acceleration', motor.acceleration));
@@ -124,7 +128,7 @@ export default function MotorConfig() {
   const hasChanges = motors.some(motor => {
     const original = originalMotors.find(o => o.id === motor.id);
     return original && (
-      motor.speed_rpm !== original.speed_rpm ||
+      Math.abs(motor.speed_rpm) !== Math.abs(original.speed_rpm) ||
       motor.acceleration !== original.acceleration ||
       motor.homing_offset !== original.homing_offset ||
       motor.home_direction !== original.home_direction ||
@@ -199,12 +203,17 @@ export default function MotorConfig() {
                 </label>
                 <input
                   type="number"
-                  value={motor.speed_rpm}
+                  value={Math.abs(motor.speed_rpm)}
                   onChange={(e) => {
-                    const value = parseInt(e.target.value) || 0;
-                    setMotors(prev => prev.map(m =>
-                      m.id === motor.id ? { ...m, speed_rpm: value } : m
-                    ));
+                    const value = parseInt(e.target.value, 10);
+                    const magnitude = Number.isNaN(value) ? 0 : Math.abs(value);
+                    setMotors(prev => prev.map(m => {
+                      if (m.id !== motor.id) return m;
+                      const currentOriginal = originalMotors.find(o => o.id === motor.id);
+                      const signSource = currentOriginal?.speed_rpm ?? m.speed_rpm;
+                      const sign = signSource === 0 ? 1 : Math.sign(signSource);
+                      return { ...m, speed_rpm: sign * magnitude };
+                    }));
                   }}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"

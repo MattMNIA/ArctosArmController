@@ -4,7 +4,7 @@ import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -14,9 +14,12 @@ try:  # pandas is required for training but may not be installed yet
 except ImportError as exc:  # pragma: no cover - runtime check
     raise ImportError("pandas is required to train the gesture model. Install it via requirements.txt.") from exc
 
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder
 
 PROJECT_ROOT = Path(__file__).resolve().parents[0]
@@ -72,7 +75,116 @@ def parse_args() -> argparse.Namespace:
         default=PROJECT_ROOT / "gestures.yml",
         help="Gesture config file to embed into model metadata",
     )
+    parser.add_argument(
+        "--model-type",
+        choices=[
+            "random_forest",
+            "extra_trees",
+            "sgd",
+            "logistic",
+            "mlp",
+            "naive_bayes",
+        ],
+        default="random_forest",
+        help="Classifier to train. Defaults to random_forest for parity with the existing model.",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        help="Optional label appended to the output filename when avoiding overwrites.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the output file if it already exists instead of creating a unique name.",
+    )
     return parser.parse_args()
+
+
+def ensure_unique_output_path(
+    base_path: Path,
+    model_type: str,
+    tag: Optional[str],
+    force: bool,
+) -> Path:
+    base_path = base_path.resolve()
+    if force or not base_path.exists():
+        return base_path
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    suffix_parts = [model_type, timestamp]
+    if tag:
+        suffix_parts.insert(1, tag)
+
+    candidate = base_path.with_name(
+        f"{base_path.stem}_{'_'.join(suffix_parts)}{base_path.suffix}"
+    )
+    counter = 1
+    while candidate.exists():
+        candidate = base_path.with_name(
+            f"{base_path.stem}_{'_'.join(suffix_parts)}_{counter}{base_path.suffix}"
+        )
+        counter += 1
+    return candidate
+
+
+def build_classifier(args: argparse.Namespace) -> Tuple[Any, Dict[str, Any]]:
+    """Create the classifier specified by CLI arguments and accompanying metadata."""
+
+    model_type = args.model_type
+    if model_type == "random_forest":
+        classifier = RandomForestClassifier(
+            n_estimators=args.trees,
+            max_depth=args.max_depth,
+            random_state=args.seed,
+            class_weight="balanced_subsample",
+            n_jobs=-1,
+        )
+    elif model_type == "extra_trees":
+        classifier = ExtraTreesClassifier(
+            n_estimators=args.trees,
+            max_depth=args.max_depth,
+            random_state=args.seed,
+            class_weight="balanced_subsample",
+            n_jobs=-1,
+        )
+    elif model_type == "sgd":
+        classifier = SGDClassifier(
+            loss="log_loss",
+            penalty="l2",
+            learning_rate="optimal",
+            alpha=1e-4,
+            max_iter=2000,
+            tol=1e-3,
+            random_state=args.seed,
+            class_weight="balanced",
+        )
+    elif model_type == "logistic":
+        classifier = LogisticRegression(
+            solver="lbfgs",
+            max_iter=1000,
+            class_weight="balanced",
+            random_state=args.seed,
+            multi_class="auto",
+        )
+    elif model_type == "mlp":
+        classifier = MLPClassifier(
+            hidden_layer_sizes=(64, 32),
+            activation="relu",
+            max_iter=750,
+            random_state=args.seed,
+        )
+    elif model_type == "naive_bayes":
+        classifier = GaussianNB()
+    else:  # pragma: no cover - defensive fallback
+        raise ValueError(f"Unknown model type: {model_type}")
+
+    metadata = {
+        "model_type": model_type,
+        "classifier_params": classifier.get_params(),
+    }
+    return classifier, metadata
 
 
 def load_dataset(dataset_path: Path) -> pd.DataFrame:
@@ -114,13 +226,7 @@ def train_model(df: pd.DataFrame, args: argparse.Namespace) -> Dict[str, object]
             random_state=args.seed,
         )
 
-    classifier = RandomForestClassifier(
-        n_estimators=args.trees,
-        max_depth=args.max_depth,
-        random_state=args.seed,
-        class_weight="balanced_subsample",
-        n_jobs=-1,
-    )
+    classifier, classifier_meta = build_classifier(args)
     classifier.fit(X_train, y_train)
 
     if len(X_test) > 0:
@@ -151,6 +257,7 @@ def train_model(df: pd.DataFrame, args: argparse.Namespace) -> Dict[str, object]
             "report": report,
         },
     }
+    payload["metadata"].update(classifier_meta)
     return payload
 
 
@@ -159,10 +266,21 @@ def main() -> None:
     df = load_dataset(args.dataset)
     payload = train_model(df, args)
 
-    model_dir = args.output.parent
-    model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(payload, args.output)
-    print(f"Model saved to {args.output}")
+    output_base = args.output
+    if not output_base.is_absolute():
+        output_base = (PROJECT_ROOT / output_base).resolve()
+    output_path = ensure_unique_output_path(output_base, args.model_type, args.tag, args.force)
+    if output_path != output_base:
+        print(f"Output file {output_base} exists; saving to {output_path} instead.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_entry = payload.setdefault("metadata", {})
+    if isinstance(metadata_entry, dict):
+        metadata_entry["output_path"] = str(output_path)
+    else:
+        payload["metadata"] = {"output_path": str(output_path)}
+    joblib.dump(payload, output_path)
+    print(f"Model saved to {output_path}")
 
     gesture_config = load_gesture_config(args.config)
     print("Configured gestures:")

@@ -50,6 +50,9 @@ class FingerInput(InputController):
     def get_events(self) -> List[Tuple[str, Any, float]]:
         return self._strategy.get_events()
 
+    def set_teleop_mode(self, mode: str, hold_for: Optional[float] = None) -> None:
+        self._strategy.set_teleop_mode(mode, hold_for=hold_for)
+
     def close(self) -> None:
         self._strategy.close()
 

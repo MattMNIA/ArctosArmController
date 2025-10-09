@@ -1,0 +1,14 @@
+CAN
+Joint 0: + CW, -CCW (From Top)
+Joint 1: + Backwards, - Forwards
+Joint 2: + Down, - Up
+Joint 3: + CW, - CCW (From Front)
+Joint 4: + Down, - Up
+Joint 5: + CCW, - CW (From Front)
+PYBULLET
+Joint 0: + CCW, - CW
+Joint 1: + Forwards, - Backwards
+Joint 2: + Up, - Down
+Joint 3: CW, - CCW
+Joint 4: + Up, - Down
+Joint 5: + CW, - CCW

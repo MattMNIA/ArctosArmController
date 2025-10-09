@@ -38,6 +38,7 @@ class TeleopController:
         self.velocity_refresh_interval = 0.5  # seconds between keep-alive commands
         self._last_velocity_command: Dict[int, float] = {}
         self._paused = True
+        self._notify_input_mode("paused")
 
     def teleop_step(self):
         """
@@ -143,6 +144,7 @@ class TeleopController:
         logger.info("Teleoperation paused")
         self.stop_all()
         self._paused = True
+        self._notify_input_mode("paused")
         if self.motion_service and hasattr(self.motion_service, "paused"):
             try:
                 self.motion_service.paused = True
@@ -154,6 +156,7 @@ class TeleopController:
             return
         logger.info("Teleoperation resumed")
         self._paused = False
+        self._notify_input_mode("active")
         if self.motion_service and hasattr(self.motion_service, "paused"):
             try:
                 self.motion_service.paused = False
@@ -162,6 +165,7 @@ class TeleopController:
 
     def _zero_all_joints(self) -> None:
         logger.info("Gesture requested zeroing joints to [0, 0, 0, 0, 0, 0]")
+        self._notify_input_mode("zeroing", hold_for=3.0)
         self.stop_all()
         zero_targets = [0.0] * 6
 
@@ -177,6 +181,20 @@ class TeleopController:
             self.driver.send_joint_targets(zero_targets)
         except Exception as exc:
             logger.error("Driver failed to move joints to zero: %s", exc)
+
+    def _notify_input_mode(self, mode: str, *, hold_for: Optional[float] = None) -> None:
+        setter = getattr(self.input_controller, "set_teleop_mode", None)
+        if not callable(setter):
+            return
+        try:
+            if hold_for is not None:
+                setter(mode, hold_for=hold_for)
+            else:
+                setter(mode)
+        except TypeError:
+            setter(mode)
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            logger.debug("Failed to notify input controller of mode %s: %s", mode, exc)
 
     def stop_all(self):
         """Stop all active teleoperation movements."""
