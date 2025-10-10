@@ -248,7 +248,7 @@ class CanDriver():
         # Coupled mode for joints 4 and 5
         if joint_index == 4:
             # Joint 4: motors opposite directions
-            motor_scales = {4: scale, 5: -scale}
+            motor_scales = {4: -scale, 5: scale}
         elif joint_index == 5:
             # Joint 5: motors same direction
             motor_scales = {4: scale, 5: scale}
