@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import { RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { AnimatedButton } from '../components/ui/AnimatedButton';
+import { AlertBanner } from '../components/ui/AlertBanner';
+import { LoadingState } from '../components/ui/LoadingState';
 
 export default function SimulationVideo() {
   const [simulationActive, setSimulationActive] = useState<boolean | null>(null);
@@ -40,12 +43,9 @@ export default function SimulationVideo() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="flex items-center space-x-3">
-          <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xl text-gray-300">
-            {retrying ? 'Checking simulation status...' : 'Loading simulation status...'}
-          </span>
-        </div>
+        <LoadingState
+          message={retrying ? 'Checking simulation status...' : 'Loading simulation status...'}
+        />
       </div>
     );
   }
@@ -55,14 +55,14 @@ export default function SimulationVideo() {
       <div className="max-w-4xl mx-auto px-4">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-bold">PyBullet Simulation Video Feed</h1>
-          <button
+          <AnimatedButton
             onClick={handleRefresh}
             disabled={retrying}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-semibold transition-colors duration-200 disabled:cursor-not-allowed"
+            loading={retrying}
+            leftIcon={<RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />}
           >
-            <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
-            <span>{retrying ? 'Checking...' : 'Refresh'}</span>
-          </button>
+            {retrying ? 'Checking...' : 'Refresh'}
+          </AnimatedButton>
         </div>
 
         {/* Status Indicator */}
@@ -86,15 +86,12 @@ export default function SimulationVideo() {
 
         {/* Error Display */}
         {error && (
-          <div className="bg-red-900/20 border border-red-800 rounded-2xl p-4 mb-6">
-            <div className="flex items-center space-x-3">
-              <AlertCircle className="w-5 h-5 text-red-400" />
-              <div>
-                <h3 className="font-semibold text-red-400">Connection Error</h3>
-                <p className="text-red-300 text-sm">{error}</p>
-              </div>
-            </div>
-          </div>
+          <AlertBanner
+            variant="error"
+            title="Connection Error"
+            message={error}
+            className="mb-6"
+          />
         )}
         
         {simulationActive ? (
@@ -113,14 +110,15 @@ export default function SimulationVideo() {
             <p className="text-red-600 dark:text-red-300 mb-4">
               The PyBullet simulation is not currently active. Please start the backend with the PyBullet driver to view the video feed.
             </p>
-            <button
+            <AnimatedButton
               onClick={handleRefresh}
               disabled={retrying}
-              className="flex items-center space-x-2 px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg font-semibold transition-colors duration-200 disabled:cursor-not-allowed"
+              loading={retrying}
+              variant="danger"
+              leftIcon={<RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />}
             >
-              <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
-              <span>{retrying ? 'Checking...' : 'Check Again'}</span>
-            </button>
+              {retrying ? 'Checking...' : 'Check Again'}
+            </AnimatedButton>
           </div>
         )}
       </div>

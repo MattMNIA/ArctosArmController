@@ -11,6 +11,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const navItems = [
+    { id: 'landing', label: 'Overview' },
     { id: 'control', label: 'Robot Control' },
     { id: 'status', label: 'Motor Status' },
     { id: 'dashboard', label: 'Arm Dashboard' },
@@ -18,6 +19,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'homing', label: 'Motor Homing' },
     { id: 'config', label: 'Motor Config' },
     { id: 'visualization', label: '3D Visualization' },
+    { id: 'arm-showcase', label: 'Arm Showcase (Temp)' },
   ];
 
   const isActive = (itemId: string) => currentPage === itemId;
@@ -31,12 +33,15 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
       <div className="w-full pl-8 pr-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="font-bold text-xl text-white"
-          >
-            ArctosArm
-          </motion.div>
+            <motion.div
+              whileHover={{ scale: 1.05 }}
+              className="font-black text-2xl tracking-wider drop-shadow-lg"
+            >
+              <span className="text-green-500">F</span>
+              <span className="text-orange-200">E</span>
+              <span className="text-yellow-100">R</span>
+              <span className="text-purple-600">B</span>
+            </motion.div>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">

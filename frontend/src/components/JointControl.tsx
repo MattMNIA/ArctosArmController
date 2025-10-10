@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Play, Calculator } from 'lucide-react';
+import { AnimatedButton } from './ui/AnimatedButton';
 
 interface JointControlProps {
   jointInputs: string[];
@@ -56,27 +57,26 @@ export default function JointControl({
         ))}
 
         <div className="flex gap-4 mt-auto">
-          <motion.button
+          <AnimatedButton
             onClick={onSolveIK}
             disabled={loading || !connected}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="flex-1 flex items-center justify-center space-x-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+            size="md"
+            className="flex-1"
+            leftIcon={<Calculator className="w-5 h-5" />}
           >
-            <Calculator className="w-5 h-5" />
-            <span>{loading ? 'Solving...' : 'Solve IK'}</span>
-          </motion.button>
+            {loading ? 'Solving...' : 'Solve IK'}
+          </AnimatedButton>
 
-          <motion.button
+          <AnimatedButton
             onClick={onExecuteMove}
             disabled={loading || !connected}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="flex-1 flex items-center justify-center space-x-2 px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+            size="md"
+            className="flex-1"
+            variant="success"
+            leftIcon={<Play className="w-5 h-5" />}
           >
-            <Play className="w-5 h-5" />
-            <span>{loading ? 'Executing...' : 'Execute'}</span>
-          </motion.button>
+            {loading ? 'Executing...' : 'Execute'}
+          </AnimatedButton>
         </div>
       </div>
     </motion.div>

@@ -1,9 +1,13 @@
-import React, { Suspense, useEffect, useState, useRef } from "react";
+import React, { Suspense, useEffect, useState, useCallback } from "react";
 import { Canvas, useLoader, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import URDFLoader from "urdf-loader";
 import * as THREE from "three";
-import io, { Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
+import { useSocketConnection } from '../hooks/useSocketConnection';
+import { ConnectionIndicator } from '../components/ui/ConnectionIndicator';
+import { AlertBanner } from '../components/ui/AlertBanner';
+import { LoadingState } from '../components/ui/LoadingState';
 
 interface URDFProps {
   path: string;
@@ -97,55 +101,55 @@ urdf.rotation.x = -Math.PI / 2; // rotate -90 degrees around X
 
 const RoboticArmViewer: React.FC = () => {
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
-  const [connected, setConnected] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
+  const [initialTelemetryReceived, setInitialTelemetryReceived] = useState(false);
 
-  useEffect(() => {
-    // Connect to websocket
-    const socket = io('http://localhost:5000', {
-      transports: ['websocket', 'polling'],
-      timeout: 5000,
-      forceNew: true
-    });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setConnected(true);
-    });
-
-    socket.on('disconnect', () => {
-      setConnected(false);
-    });
-
-    socket.on('telemetry', (data: TelemetryData) => {
-      setTelemetry(data);
-    });
-
-    socket.on('connect_error', (error) => {
-      console.error('WebSocket connection error:', error);
-      setConnected(false);
-    });
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-    };
+  const handleTelemetry = useCallback((data: TelemetryData) => {
+    setTelemetry(data);
+    setInitialTelemetryReceived(true);
   }, []);
+
+  const { status: connectionStatus } = useSocketConnection('http://localhost:5000', {
+    registerHandlers: useCallback((socket: Socket) => {
+      socket.on('telemetry', handleTelemetry);
+      return () => socket.off('telemetry', handleTelemetry);
+    }, [handleTelemetry]),
+    onDisconnect: () => {
+      setInitialTelemetryReceived(false);
+    },
+    onConnectError: (error) => {
+      console.error('WebSocket connection error:', error);
+      return 'Failed to connect to backend server. Please ensure the backend is running.';
+    },
+  });
+
+  const { connected, loading: connecting, error } = connectionStatus;
 
   // Default joint angles if no telemetry received
   const jointAngles = telemetry?.q || [0, 0, 0, 0, 0, 0];
+  const showLoading = connecting || (connected && !initialTelemetryReceived);
 
   return (
     <div className="relative w-full h-screen bg-gray-900">
       {/* Connection Status Indicator */}
       <div className="absolute top-4 left-4 z-10 flex items-center space-x-2 bg-gray-800/80 backdrop-blur-sm rounded-lg px-3 py-2">
-        <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-sm text-white">
-          {connected ? 'Connected' : 'Disconnected'}
-        </span>
+        <ConnectionIndicator connected={connected} />
       </div>
+
+      {showLoading && (
+        <div className="absolute top-16 left-1/2 z-10 w-full max-w-xs -translate-x-1/2">
+          <LoadingState message={connecting ? 'Connecting to simulation...' : 'Waiting for telemetry...'} className="py-4" />
+        </div>
+      )}
+
+      {error && (
+        <div className="absolute top-4 left-1/2 z-10 w-full max-w-lg -translate-x-1/2">
+          <AlertBanner
+            variant="error"
+            title="Connection Error"
+            message={error}
+          />
+        </div>
+      )}
 
       {/* Joint Angles Display */}
       <div className="absolute top-4 right-4 z-10 bg-gray-800/80 backdrop-blur-sm rounded-lg p-3 max-w-xs">
