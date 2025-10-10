@@ -4,10 +4,11 @@ PyYAML
 pybullet
 flask-cors
 requests
-opencv-python
 opencv-contrib-python
 mediapipe
 numpy
 pandas
 scikit-learn
 joblib
+pillow 
+apriltag
