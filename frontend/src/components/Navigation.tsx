@@ -17,6 +17,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'simulation', label: 'Simulation Video' },
     { id: 'homing', label: 'Motor Homing' },
     { id: 'config', label: 'Motor Config' },
+    { id: 'camera', label: 'Camera Config' },
     { id: 'visualization', label: '3D Visualization' },
   ];
 

@@ -9,9 +9,10 @@ import SimulationVideo from './pages/SimulationVideo';
 import MotorHoming from './pages/MotorHoming';
 import ArmVisualization from './pages/ArmVisualization';
 import MotorConfig from './pages/MotorConfig';
+import CameraConfig from './pages/CameraConfig';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('config');
+  const [currentPage, setCurrentPage] = useState('camera');
 
   const renderPage = () => {
     switch (currentPage) {
@@ -27,6 +28,8 @@ function App() {
         return <ArmVisualization />;
       case 'config':
         return <MotorConfig />;
+      case 'camera':
+        return <CameraConfig />;
       case 'control':
       default:
         return <RobotControl />;
