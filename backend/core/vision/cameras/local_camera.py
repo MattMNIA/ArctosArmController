@@ -63,6 +63,24 @@ class LocalCamera(CameraBase):
         """Check if the camera is opened."""
         return self._capture.isOpened()
 
+    def take_picture(self) -> bytes:
+        """Capture a single frame and return it as JPEG bytes."""
+
+        if not self.is_opened():
+            raise RuntimeError(f"Camera index {self._camera_index} is not open.")
+
+        success, frame = self.read()
+        if not success or frame is None:
+            raise RuntimeError(
+                f"Failed to capture frame from camera index {self._camera_index}."
+            )
+
+        encoded, buffer = cv2.imencode(".jpg", frame)
+        if not encoded:
+            raise RuntimeError("Failed to encode frame as JPEG.")
+
+        return buffer.tobytes()
+
     @property
     def camera_index(self):
         """Get the selected camera index."""

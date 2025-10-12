@@ -22,6 +22,12 @@ class CameraBase(ABC):
         """Check if the camera is opened."""
         pass
 
+    @abstractmethod
+    def take_picture(self) -> bytes:
+        """Capture a still image and return it as encoded bytes."""
+
+        pass
+
     # --- Optional configuration API -------------------------------------
 
     def get_supported_controls(self) -> Dict[str, CameraControlDefinition]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -58,6 +59,26 @@ class IPCamera(CameraBase):
     def is_opened(self):
         """Check if the camera is opened."""
         return self._capture.isOpened()
+
+    def take_picture(self) -> bytes:
+        """Trigger the camera to capture a still image and return JPEG bytes."""
+
+        params = {"_cb": int(time.time() * 1000)}
+        try:
+            response = self._session.get(
+                f"{self._control_base_url}/capture",
+                params=params,
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            logger.error("Failed to capture still image: %s", exc)
+            raise RuntimeError("Failed to capture still image from IP camera") from exc
+
+        if not response.content:
+            raise RuntimeError("Received empty response when capturing still image")
+
+        return response.content
 
     @property
     def url(self) -> str:
