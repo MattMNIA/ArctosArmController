@@ -5,7 +5,7 @@ from PIL import Image
 
 # === Configuration ===
 CALIBRATION_ROOT = os.path.dirname(__file__)
-save_dir = os.path.join(CALIBRATION_ROOT, "images")
+save_dir = os.path.join(CALIBRATION_ROOT, "calibration_boards")
 os.makedirs(save_dir, exist_ok=True)
 
 dpi = 300  # for high-quality print

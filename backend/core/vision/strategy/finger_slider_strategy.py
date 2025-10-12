@@ -470,6 +470,13 @@ class FingerSliderStrategy:
                 self._status_message = "Reset touch scaling"
                 self._status_message_until = time.time() + 2.0
                 self._pinch_states.clear()
+            if key in (ord("c"), ord("C")):
+                if self._camera.cycle_camera():
+                    self._camera_index = self._camera.camera_index
+                    self._status_message = f"Switched to camera {self._camera_index}"
+                else:
+                    self._status_message = "No alternate cameras detected"
+                self._status_message_until = time.time() + 2.0
 
         self._latest_joint_values = dict(joint_values)
         self._latest_gripper_value = gripper_value

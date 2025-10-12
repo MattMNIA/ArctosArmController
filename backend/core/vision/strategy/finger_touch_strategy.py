@@ -233,6 +233,12 @@ class FingerTouchStrategy:
                 cv2.setWindowProperty(self._window_name, cv2.WND_PROP_FULLSCREEN, target_flag)
             if key in (ord("h"), ord("H")):
                 self._hand_overlay_enabled = not self._hand_overlay_enabled
+            if key in (ord("c"), ord("C")):
+                if self._camera.cycle_camera():
+                    self._camera_index = self._camera.camera_index
+                    print(f"Switched to camera index {self._camera_index}")
+                else:
+                    print("No alternate cameras detected; staying on current camera.")
 
         return gestures
 

@@ -6,7 +6,7 @@ import cv2
 
 from .camera_base import CameraBase
 from .camera_controls import LOCAL_CAMERA_CONTROLS, CameraControlDefinition, ControlType
-from .camera_selector import select_camera_index
+from .camera_selector import list_available_cameras, select_camera_index
 
 
 class LocalCamera(CameraBase):
@@ -25,14 +25,57 @@ class LocalCamera(CameraBase):
         "auto_wb": "CAP_PROP_AUTO_WB",
     }
 
-    def __init__(self, camera_index: Optional[int] = None):
-        selected_index = select_camera_index(camera_index)
+    def __init__(self, camera_index: Optional[int] = None, max_camera_index: int = 8):
+        self._max_camera_index = max(1, int(max_camera_index))
+        selected_index = select_camera_index(camera_index, max_index=self._max_camera_index)
+        self._capture = self._open_capture(selected_index)
         self._camera_index = selected_index
-        self._capture = cv2.VideoCapture(selected_index, cv2.CAP_DSHOW)
-        if not self._capture or not self._capture.isOpened():
-            raise RuntimeError(f"Failed to open camera index {selected_index}.")
 
         self._control_definitions = self._build_control_definitions()
+
+    def _open_capture(self, index: int) -> cv2.VideoCapture:
+        capture = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if not capture or not capture.isOpened():
+            if capture:
+                capture.release()
+            raise RuntimeError(f"Failed to open camera index {index}.")
+        return capture
+
+    def _ensure_capture(self) -> cv2.VideoCapture:
+        if not self._capture:
+            raise RuntimeError("Camera capture is not initialized.")
+        return self._capture
+
+    def cycle_camera(self) -> bool:
+        """Switch to the next available camera index if possible."""
+        available = sorted(set(list_available_cameras(self._max_camera_index)))
+        if self._camera_index not in available:
+            available.append(self._camera_index)
+            available.sort()
+
+        if len(available) <= 1:
+            print("No alternate cameras detected; staying on current camera.")
+            return False
+
+        current_pos = available.index(self._camera_index)
+        next_index = available[(current_pos + 1) % len(available)]
+        if next_index == self._camera_index:
+            print("No alternate cameras detected; staying on current camera.")
+            return False
+
+        try:
+            new_capture = self._open_capture(next_index)
+        except RuntimeError as exc:
+            print(f"Failed to switch to camera index {next_index}: {exc}")
+            return False
+
+        previous_capture = self._capture
+        self._capture = new_capture
+        self._camera_index = next_index
+        if previous_capture and previous_capture.isOpened():
+            previous_capture.release()
+        print(f"Switched to camera index {next_index}.")
+        return True
 
     def _build_control_definitions(self) -> Dict[str, CameraControlDefinition]:
         definitions: Dict[str, CameraControlDefinition] = {}
@@ -52,16 +95,18 @@ class LocalCamera(CameraBase):
     # Video capture primitives
     def read(self):
         """Read a frame from the camera."""
-        return self._capture.read()
+        capture = self._ensure_capture()
+        return capture.read()
 
     def release(self):
         """Release the camera capture."""
         if self._capture and self._capture.isOpened():
             self._capture.release()
+        self._capture = None
 
     def is_opened(self):
         """Check if the camera is opened."""
-        return self._capture.isOpened()
+        return bool(self._capture) and self._capture.isOpened()
 
     def take_picture(self) -> bytes:
         """Capture a single frame and return it as JPEG bytes."""
@@ -100,7 +145,8 @@ class LocalCamera(CameraBase):
         if property_id is None:
             raise KeyError(f"No property mapping for control '{control_id}'")
 
-        value = self._capture.get(property_id)
+        capture = self._ensure_capture()
+        value = capture.get(property_id)
         if value == -1:
             return definition.default
 
@@ -118,7 +164,8 @@ class LocalCamera(CameraBase):
             raise KeyError(f"No property mapping for control '{control_id}'")
 
         normalized_value = self._normalize_value(definition, value)
-        success = self._capture.set(property_id, normalized_value)
+        capture = self._ensure_capture()
+        success = capture.set(property_id, normalized_value)
         if not success:
             raise RuntimeError(f"Failed to set control '{control_id}' on camera index {self._camera_index}")
 
