@@ -9,3 +9,4 @@ frontend/.vite/
 frontend/.env
 frontend/.env.*
 backend/core/vision/detectors/gesture/data/
+joint_direction.txt
