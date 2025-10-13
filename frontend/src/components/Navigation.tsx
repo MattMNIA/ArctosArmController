@@ -43,7 +43,14 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
           transition={{ duration: 0.5 }}
           className="text-xl font-bold"
         >
-          <span className={getThemeClasses('', { light: 'text-blue-600', dark: 'text-blue-400' }, darkMode)}>Matthew Morgan</span>
+            <div className="flex items-center space-x-3">
+            <span className={getThemeClasses('', { light: 'text-blue-600', dark: 'text-blue-400' }, darkMode)}>Matthew Morgan</span>
+            <span className="text-sm opacity-60">/</span>
+            <span className={getThemeClasses('text-sm font-semibold px-2 py-1 rounded', 
+              { light: 'bg-blue-100 text-blue-800', dark: 'bg-blue-900/50 text-blue-300' }, darkMode)}>
+              FERB
+            </span>
+            </div>
         </motion.div>
 
         {/* Desktop Navigation */}
