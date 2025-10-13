@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeProvider } from './components/ThemeProvider';
 import Navigation from './components/Navigation';
+import LandingPage from './pages/LandingPage';
 import RobotControl from './pages/RobotControl';
 import MotorStatus from './pages/MotorStatus';
 import ArmDashboard from './pages/ArmDashboard';
@@ -9,30 +10,36 @@ import SimulationVideo from './pages/SimulationVideo';
 import MotorHoming from './pages/MotorHoming';
 import ArmVisualization from './pages/ArmVisualization';
 import MotorConfig from './pages/MotorConfig';
+import { isPrivateBuild } from './utils/buildFlags';
 import CameraConfig from './pages/CameraConfig';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('camera');
+  const [currentPage, setCurrentPage] = useState('landing');
+
+  // allow private pages when either we built a private bundle or we're running locally
+  const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const allowPrivate = isPrivateBuild || isLocalHost;
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'landing':
+        return <LandingPage />;
       case 'status':
-        return <MotorStatus />;
+        return allowPrivate ? <MotorStatus /> : <LandingPage />;
       case 'dashboard':
-        return <ArmDashboard />;
+        return allowPrivate ? <ArmDashboard /> : <LandingPage />;
       case 'simulation':
-        return <SimulationVideo />;
+        return allowPrivate ? <SimulationVideo /> : <LandingPage />;
       case 'homing':
-        return <MotorHoming />;
+        return allowPrivate ? <MotorHoming /> : <LandingPage />;
       case 'visualization':
-        return <ArmVisualization />;
+        return allowPrivate ? <ArmVisualization /> : <LandingPage />;
       case 'config':
-        return <MotorConfig />;
-      case 'camera':
-        return <CameraConfig />;
+        return allowPrivate ? <MotorConfig /> : <LandingPage />;
       case 'control':
+        return allowPrivate ? <RobotControl /> : <LandingPage />;
       default:
-        return <RobotControl />;
+        return allowPrivate ? <RobotControl /> : <LandingPage />;
     }
   };
 

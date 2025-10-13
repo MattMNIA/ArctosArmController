@@ -1,6 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
-import { Home, CheckCircle, AlertCircle, Loader, Save } from 'lucide-react';
-import io, { Socket } from 'socket.io-client';
+import { useState, useCallback } from 'react';
+import { Home, CheckCircle, AlertCircle, Loader, Save, RefreshCw } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
+import { useSocketConnection } from '../hooks/useSocketConnection';
+import { ConnectionIndicator } from '../components/ui/ConnectionIndicator';
+import { AlertBanner } from '../components/ui/AlertBanner';
+import { AnimatedButton } from '../components/ui/AnimatedButton';
 
 export default function MotorHoming() {
   const [selectedMotors, setSelectedMotors] = useState<Set<number>>(new Set());
@@ -11,60 +15,42 @@ export default function MotorHoming() {
   const [jointAngles, setJointAngles] = useState<Record<number, number>>({});
   const [adjustingMotors, setAdjustingMotors] = useState<Set<number>>(new Set());
   const [isAdjusting, setIsAdjusting] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
 
   const motors = [0, 1, 2, 3, 4, 5];
 
-  useEffect(() => {
-    // WebSocket connection for real-time telemetry
-    const socket = io('http://localhost:5000', {
-      transports: ['websocket', 'polling'],
-      timeout: 5000,
-      forceNew: true
-    });
+  const handleTelemetry = useCallback((data: any) => {
+    if (data.encoders && Array.isArray(data.encoders)) {
+      const newEncoders: Record<number, number> = {};
+      data.encoders.forEach((encoder: number, index: number) => {
+        newEncoders[index] = encoder;
+      });
+      setEncoderValues(newEncoders);
+    }
 
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setConnected(true);
-    });
-
-    socket.on('disconnect', () => {
-      setConnected(false);
-    });
-
-    socket.on('telemetry', (data: any) => {
-      // Update encoder values from telemetry
-      if (data.encoders && Array.isArray(data.encoders)) {
-        const newEncoders: Record<number, number> = {};
-        data.encoders.forEach((encoder: number, index: number) => {
-          newEncoders[index] = encoder;
-        });
-        setEncoderValues(newEncoders);
-      }
-      
-      // Update joint angles from telemetry
-      if (data.q && Array.isArray(data.q)) {
-        const newAngles: Record<number, number> = {};
-        data.q.forEach((angle: number, index: number) => {
-          newAngles[index] = angle;
-        });
-        setJointAngles(newAngles);
-      }
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('WebSocket connection error:', err);
-      setConnected(false);
-    });
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-    };
+    if (data.q && Array.isArray(data.q)) {
+      const newAngles: Record<number, number> = {};
+      data.q.forEach((angle: number, index: number) => {
+        newAngles[index] = angle;
+      });
+  setJointAngles(newAngles);
+    }
   }, []);
+
+  const { status: connectionStatus, reconnect } = useSocketConnection('http://localhost:5000', {
+    registerHandlers: useCallback((socket: Socket) => {
+      socket.on('telemetry', handleTelemetry);
+      return () => socket.off('telemetry', handleTelemetry);
+    }, [handleTelemetry]),
+    onDisconnect: () => {
+      // Telemetry will resume when connection is restored
+    },
+    onConnectError: (err) => {
+      console.error('WebSocket connection error:', err);
+      return 'Failed to connect to backend server. Please ensure the backend is running.';
+    },
+  });
+
+  const { connected, loading: connecting, error: connectionError, reconnecting } = connectionStatus;
 
   const toggleMotor = (motorId: number) => {
     const newSelected = new Set(selectedMotors);
@@ -248,23 +234,53 @@ export default function MotorHoming() {
   return (
     <section className="py-8 min-h-screen">
       <div className="max-w-4xl mx-auto px-4">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">Joint Homing Control</h1>
+        <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-3xl font-bold">Joint Homing Control</h1>
+            <ConnectionIndicator connected={connected} className="mt-2 justify-start" />
+          </div>
           <div className="flex space-x-2">
-            <button
-              onClick={selectAll}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors duration-200"
-            >
+            <AnimatedButton onClick={selectAll} size="sm">
               Select All
-            </button>
-            <button
-              onClick={clearAll}
-              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-semibold transition-colors duration-200"
-            >
+            </AnimatedButton>
+            <AnimatedButton onClick={clearAll} size="sm" variant="secondary">
               Clear All
-            </button>
+            </AnimatedButton>
           </div>
         </div>
+
+        {connecting && !connectionError && (
+          <AlertBanner
+            variant="info"
+            title="Connecting to backend"
+            message="Establishing real-time telemetry feed for homing controls."
+            className="mb-4"
+          />
+        )}
+
+        {connectionError && (
+          <AlertBanner
+            variant="error"
+            title="Connection Error"
+            message={connectionError}
+            action={{
+              label: reconnecting ? 'Reconnecting...' : 'Retry Connection',
+              onClick: reconnect,
+              icon: <RefreshCw className="w-4 h-4" />,
+              loading: reconnecting,
+            }}
+            className="mb-4"
+          />
+        )}
+
+        {!connected && !connectionError && !connecting && (
+          <AlertBanner
+            variant="warning"
+            title="Connection Required"
+            message="Waiting for backend connection before homing commands can be issued."
+            className="mb-4"
+          />
+        )}
 
         {/* Error Display */}
         {error && (

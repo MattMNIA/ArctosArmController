@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Grip } from 'lucide-react';
+import { AnimatedButton } from './ui/AnimatedButton';
 
 interface GripperControlProps {
   gripperInput: string;
@@ -28,27 +29,23 @@ export default function GripperControl({
       <div className="space-y-6 h-full flex flex-col">
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-4">
-          <motion.button
+          <AnimatedButton
             onClick={onOpenGripper}
             disabled={!connected}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="flex items-center justify-center space-x-2 px-6 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+            size="lg"
+            leftIcon={<Grip className="w-5 h-5" />}
           >
-            <Grip className="w-5 h-5" />
-            <span>Open</span>
-          </motion.button>
+            Open
+          </AnimatedButton>
 
-          <motion.button
+          <AnimatedButton
             onClick={onCloseGripper}
             disabled={!connected}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="flex items-center justify-center space-x-2 px-6 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+            size="lg"
+            leftIcon={<Grip className="w-5 h-5 rotate-90" />}
           >
-            <Grip className="w-5 h-5 rotate-90" />
-            <span>Close</span>
-          </motion.button>
+            Close
+          </AnimatedButton>
         </div>
 
         {/* Precise Control */}
@@ -65,15 +62,14 @@ export default function GripperControl({
               onChange={(e) => setGripperInput(e.target.value)}
               className="flex-1 px-4 py-3 rounded-xl border border-gray-600 bg-gray-700 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
             />
-            <motion.button
+            <AnimatedButton
               onClick={onSetGripper}
               disabled={!connected}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              size="md"
+              className="px-6"
             >
               Set
-            </motion.button>
+            </AnimatedButton>
           </div>
           <p className="text-xs text-gray-400 mt-2">
             Range: 0.0 (fully open) to 1.0 (fully closed)

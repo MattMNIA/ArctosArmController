@@ -1,40 +1,19 @@
-// Theme context for dark mode only
-import { createContext, useContext, useEffect } from 'react';
+import React, { useEffect } from 'react';
+import { getThemeClasses } from '../theme';
 
-type Theme = 'dark';
-
-interface ThemeContextType {
-  theme: Theme;
-}
-
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
-
+// Simplified ThemeProvider: always use dark mode for Arctos site
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const theme: Theme = 'dark';
-
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
-    root.classList.add(theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+    root.classList.add('dark');
+  }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme }}>
-    <div className="min-h-screen bg-gray-900 text-gray-100 transition-colors duration-300">
-      {/* Central site container to keep pages at a comfortable max width */}
+    <div className={getThemeClasses('min-h-screen transition-colors duration-300', { light: 'bg-gray-50 text-gray-900', dark: 'bg-gray-900 text-gray-100' }, true)}>
       <div className="min-h-screen">
         {children}
       </div>
     </div>
-    </ThemeContext.Provider>
   );
-}
-
-export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
 }
