@@ -66,17 +66,18 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
           className="hidden md:flex items-center space-x-8"
         >
           {navItems.slice(0,4).map((item) => (
-            <a
+            <button
               key={item.id}
+              type="button"
               onClick={() => onNavigate(item.id)}
-              className={`capitalize transition-colors ${
+              className={`capitalize transition-colors focus:outline-none ${
                 activeSection === item.id
                   ? getThemeClasses('', { light: 'text-blue-600', dark: 'text-blue-400' }, darkMode)
                   : 'hover:text-blue-500'
               }`}
             >
               {item.label}
-            </a>
+            </button>
           ))}
 
           {/* theme toggle removed for Arctos site (dark-only) */}
@@ -103,20 +104,21 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
             className={getThemeClasses('md:hidden p-4', { light: 'bg-white', dark: 'bg-gray-800' }, darkMode)}
           >
             {navItems.map((item) => (
-              <a
+              <button
                 key={item.id}
+                type="button"
                 onClick={() => {
                   onNavigate(item.id);
                   setIsMenuOpen(false);
                 }}
-                className={`block py-2 capitalize ${
+                className={`block w-full text-left py-2 capitalize ${
                   activeSection === item.id
                     ? getThemeClasses('', { light: 'text-primary-600', dark: 'text-primary-400' }, darkMode)
                     : ''
                 }`}
               >
                 {item.label}
-              </a>
+              </button>
             ))}
 
             <div className="py-2 text-sm opacity-80">Dark mode only</div>
