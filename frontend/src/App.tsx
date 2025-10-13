@@ -10,6 +10,7 @@ import SimulationVideo from './pages/SimulationVideo';
 import MotorHoming from './pages/MotorHoming';
 import ArmVisualization from './pages/ArmVisualization';
 import MotorConfig from './pages/MotorConfig';
+import { isPrivateBuild } from './utils/buildFlags';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('landing');
@@ -17,23 +18,23 @@ function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'landing':
-        return <LandingPage onNavigate={setCurrentPage} />;
+        return <LandingPage />;
       case 'status':
-        return <MotorStatus />;
+        return isPrivateBuild ? <MotorStatus /> : <LandingPage />;
       case 'dashboard':
-        return <ArmDashboard />;
+        return isPrivateBuild ? <ArmDashboard /> : <LandingPage />;
       case 'simulation':
-        return <SimulationVideo />;
+        return isPrivateBuild ? <SimulationVideo /> : <LandingPage />;
       case 'homing':
-        return <MotorHoming />;
+        return isPrivateBuild ? <MotorHoming /> : <LandingPage />;
       case 'visualization':
-        return <ArmVisualization />;
+        return isPrivateBuild ? <ArmVisualization /> : <LandingPage />;
       case 'config':
-        return <MotorConfig />;
+        return isPrivateBuild ? <MotorConfig /> : <LandingPage />;
       case 'control':
-        return <RobotControl />;
+        return isPrivateBuild ? <RobotControl /> : <LandingPage />;
       default:
-        return <RobotControl />;
+        return isPrivateBuild ? <RobotControl /> : <LandingPage />;
     }
   };
 

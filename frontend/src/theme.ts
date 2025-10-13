@@ -129,8 +129,16 @@ export const theme = {
 };
 
 // Utility functions for combining classes
-export const cn = (...classes) => classes.filter(Boolean).join(' ');
 
-export const getThemeClasses = (baseClasses, themeClasses, darkMode) => {
+// Simple class name concatenation utility
+const cn = (...classes: (string | undefined | null | false)[]): string => {
+  return classes.filter(Boolean).join(' ');
+};
+
+export const getThemeClasses = (
+  baseClasses: string, 
+  themeClasses: { light: string; dark: string }, 
+  darkMode: boolean
+): string => {
   return cn(baseClasses, darkMode ? themeClasses.dark : themeClasses.light);
 };

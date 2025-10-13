@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { getThemeClasses } from '../theme';
+import { isPrivateBuild } from '../utils/buildFlags';
 
 interface NavigationProps {
   currentPage: string;
@@ -11,18 +12,22 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Arctos site uses dark mode only
   const darkMode = true;
+  // Allow private nav either when we built a private bundle OR when user is on localhost
+  const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const allowPrivateNav = isPrivateBuild || isLocalHost;
 
   const navItems = [
-    { id: 'landing', label: 'Overview' },
-    { id: 'control', label: 'Robot Control' },
-    { id: 'status', label: 'Motor Status' },
-    { id: 'dashboard', label: 'Arm Dashboard' },
-    { id: 'simulation', label: 'Simulation Video' },
-    { id: 'homing', label: 'Motor Homing' },
-    { id: 'config', label: 'Motor Config' },
-    { id: 'visualization', label: '3D Visualization' },
-    { id: 'arm-showcase', label: 'Arm Showcase (Temp)' },
-  ];
+    { id: 'landing', label: 'Overview', public: true },
+    { id: 'control', label: 'Robot Control', public: false },
+    { id: 'status', label: 'Motor Status', public: false },
+    { id: 'dashboard', label: 'Arm Dashboard', public: false },
+    // show these only for you (private build or local dev)
+    { id: 'simulation', label: 'Simulation Video', public: false },
+    { id: 'homing', label: 'Motor Homing', public: false },
+    { id: 'config', label: 'Motor Config', public: false },
+    { id: 'visualization', label: '3D Visualization', public: false },
+    { id: 'arm-showcase', label: 'Arm Showcase (Temp)', public: false },
+  ].filter((i) => (allowPrivateNav ? true : i.public));
 
   // keep an activeSection in sync with currentPage for styling parity
   const [activeSection, setActiveSection] = useState(currentPage);
