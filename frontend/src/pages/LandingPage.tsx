@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { AnimatedButton } from '../components/ui/AnimatedButton';
 import { PageHeader } from '../components/layout/PageHeader';
+// theme helper not needed — Arctos uses dark-only styles
 
 interface LandingPageProps {
   onNavigate?: (page: string) => void;
@@ -97,7 +98,7 @@ const roadmap = [
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
   return (
-    <div className="bg-slate-950 text-slate-100">
+    <div>
       <Hero onNavigate={onNavigate} />
       <DemoGallery />
       <FeatureGrid />
@@ -109,7 +110,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
 
 function Hero({ onNavigate }: LandingPageProps) {
   return (
-    <section className="relative overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+    <section className="relative overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.15),transparent_55%)]" />
       <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center gap-6 px-6 py-24 text-center">
         <motion.span
