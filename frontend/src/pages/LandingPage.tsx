@@ -1,11 +1,7 @@
 import { motion } from 'framer-motion';
-import { AnimatedButton } from '../components/ui/AnimatedButton';
+// AnimatedButton intentionally not used in public landing page
 import { PageHeader } from '../components/layout/PageHeader';
 // theme helper not needed — Arctos uses dark-only styles
-
-interface LandingPageProps {
-  onNavigate?: (page: string) => void;
-}
 
 type DemoMediaType = 'photo' | 'gif' | 'video';
 
@@ -20,33 +16,32 @@ interface DemoMediaItem {
 
 const demoMedia: DemoMediaItem[] = [
   {
-    id: 'hero-video',
-    type: 'video',
-    title: 'Arctos Arm: Quick Overview',
-    description: 'A fast walkthrough of the teleoperation workflow and arm motion sequences.',
-    src: 'https://placehold.co/1280x720/0f172a/ffffff?text=Video+Placeholder',
-    thumbnail: 'https://placehold.co/640x360/1e293b/94a3b8?text=Video+Poster',
+    id: 'hero-gif',
+    type: 'gif',
+    title: 'Arctos Arm: Teleoperation Overview',
+    description: 'A brief demonstration of teleoperation with handtracking',
+    src: '/media/Cropped%20Duck.gif',
   },
   {
     id: 'precision-photo',
     type: 'photo',
     title: 'Precision Pick & Place',
     description: 'Macro shot showing end effector alignment with millimeter-level accuracy.',
-    src: 'https://placehold.co/800x600/0f172a/ffffff?text=Photo+Placeholder',
+    src: '/media/Holding%20Duck.JPG',
   },
   {
-    id: 'gesture-gif',
-    type: 'gif',
-    title: 'Gesture Control Loop',
-    description: 'GIF illustrating the live teleop dashboard mirroring wrist and finger movement.',
-    src: 'https://placehold.co/800x600/1e293b/ffffff?text=GIF+Placeholder',
-  },
-  {
-    id: 'safety-photo',
+    id: 'table-mount-photo',
     type: 'photo',
-    title: 'Safety & Diagnostics',
-    description: 'Diagnostic overlay showcasing real-time torque, current, and thermal readings.',
-    src: 'https://placehold.co/800x600/111827/ffffff?text=Photo+Placeholder',
+    title: 'Modular Table Mount',
+    description: 'A photo of the modular table mount for the Arctos Arm.',
+    src: '/media/Modular%20Table%20Mount.JPG',
+  },
+  {
+    id: 'homing-gif',
+    type: 'gif',
+    title: 'Motor Homing',
+    description: 'GIF demonstrating the homing process for each motor.',
+    src: '/media/Cropped%20Homing.gif',
   },
 ];
 
@@ -71,7 +66,7 @@ const featureHighlights = [
 
 const technicalSpecs = [
   { label: 'Degrees of Freedom', value: '6 + gripper' },
-  { label: 'Controller Refresh', value: '500 Hz PID loop' },
+  { label: 'Controller Refresh', value: '5KHz PID loop' },
   { label: 'Telemetry Window', value: '20+ real-time metrics' },
   { label: 'Simulation Engines', value: 'PyBullet, URDF WebGL, Custom Visualizer' },
   { label: 'Safety Systems', value: 'E-stop relay, soft limit enforcement, fault alerts' },
@@ -80,26 +75,27 @@ const technicalSpecs = [
 
 const roadmap = [
   {
-    title: 'Autonomous Sequencing Toolkit',
+    title: 'Advanced Computer Vision & Object Detection',
     target: 'Winter 2025',
-    description: 'Blend teleop and scripted moves using an editable timeline with physics-aware preview.',
+    description: 'Real-time YOLO-based object detection with semantic segmentation for autonomous grasping. Integration of depth perception and 3D object pose estimation for complex manipulation tasks.',
   },
-  {
-    title: 'Haptic Feedback Integration',
-    target: 'Spring 2026',
-    description: 'Bi-directional force cues streamed to glove controllers for richer telepresence.',
-  },
+  
   {
     title: 'Remote Demo Portal',
-    target: 'Summer 2026',
-    description: 'Invite collaborators to queue commands and replay highlight reels from anywhere.',
+    target: 'Winter 2025',
+    description: 'Invite collaborators to queue commands remotely through this website.',
+  },
+  {
+    title: 'Realistic Physics Simulation for ML Training',
+    target: 'Spring 2026',
+    description: 'High-fidelity physics simulation with realistic material properties, friction, and dynamics for training reinforcement learning models on complex manipulation tasks.',
   },
 ];
 
-export default function LandingPage({ onNavigate }: LandingPageProps) {
+export default function LandingPage() {
   return (
     <div>
-      <Hero onNavigate={onNavigate} />
+      <Hero />
       <DemoGallery />
       <FeatureGrid />
       <SpecsSection />
@@ -108,10 +104,9 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
   );
 }
 
-function Hero({ onNavigate }: LandingPageProps) {
+function Hero() {
   return (
-    <section className="relative overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.15),transparent_55%)]" />
+    <section className="relative overflow-hidden bg-slate-950 text-slate-100">
       <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center gap-6 px-6 py-24 text-center">
         <motion.span
           className="inline-flex items-center rounded-full border border-blue-400/40 bg-blue-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-blue-200"
@@ -137,26 +132,10 @@ function Hero({ onNavigate }: LandingPageProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          Explore live demos, feature walkthroughs, and future plans for the Arctos teleoperated arm. This page is a living scrapbook—swap in your own footage, screenshots, and highlight reels to tell the story of the build.
+          Learn about the design, control system, and features of the FERB throughout the assembly process.
         </motion.p>
 
-        <div className="flex flex-wrap justify-center gap-4">
-          <AnimatedButton
-            size="lg"
-            onClick={() => onNavigate?.('control')}
-            className="shadow-lg shadow-blue-500/20"
-          >
-            Launch Control Interface
-          </AnimatedButton>
-          <AnimatedButton
-            size="lg"
-            variant="ghost"
-            className="border-white/20 bg-white/10 text-white hover:bg-white/20"
-            onClick={() => onNavigate?.('visualization')}
-          >
-            Open Simulation View
-          </AnimatedButton>
-        </div>
+        {/* Buttons intentionally removed for public view */}
       </div>
     </section>
   );
@@ -168,7 +147,7 @@ function DemoGallery() {
       <div className="mx-auto w-full max-w-6xl px-6 md:px-10">
         <PageHeader
           title="Demo Media"
-          description="Swap these placeholders with GIFs, photos, or video clips from your builds and presentations."
+          description=""
           centered
           animate={false}
         />
@@ -227,7 +206,7 @@ function FeatureGrid() {
       <div className="mx-auto w-full max-w-6xl px-6 md:px-10">
         <PageHeader
           title="Feature Highlights"
-          description="Capture the talking points you cover during demos—what makes this robotic arm unique?"
+          description=""
           centered
           animate={false}
         />
@@ -258,7 +237,7 @@ function SpecsSection() {
       <div className="mx-auto w-full max-w-5xl px-6 md:px-10">
         <PageHeader
           title="Technical Specs"
-          description="Keep the numbers handy—swap in the precise specs that matter to your audience."
+          description=""
           centered
           animate={false}
         />
@@ -289,7 +268,7 @@ function RoadmapSection() {
       <div className="mx-auto w-full max-w-5xl px-6 md:px-10">
         <PageHeader
           title="Plans for the Future"
-          description="Outline the next milestones so viewers know where the project is headed."
+          description=""
           centered
           animate={false}
         />
