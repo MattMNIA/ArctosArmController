@@ -26,7 +26,6 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'homing', label: 'Motor Homing', public: false },
     { id: 'config', label: 'Motor Config', public: false },
     { id: 'visualization', label: '3D Visualization', public: false },
-    { id: 'arm-showcase', label: 'Arm Showcase (Temp)', public: false },
   ].filter((i) => (allowPrivateNav ? true : i.public));
 
   // keep an activeSection in sync with currentPage for styling parity
@@ -65,7 +64,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
           transition={{ duration: 0.5, delay: 0.2 }}
           className="hidden md:flex items-center space-x-8"
         >
-          {navItems.slice(0,4).map((item) => (
+          {navItems.slice(0,5).map((item) => (
             <button
               key={item.id}
               type="button"

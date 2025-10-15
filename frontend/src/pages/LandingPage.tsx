@@ -18,7 +18,7 @@ const demoMedia: DemoMediaItem[] = [
   {
     id: 'hero-gif',
     type: 'gif',
-    title: 'Arctos Arm: Teleoperation Overview',
+    title: 'FERB: Teleoperation Overview',
     description: 'A brief demonstration of teleoperation with handtracking',
     src: '/media/Cropped%20Duck.gif',
   },
@@ -114,7 +114,7 @@ function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          Arctos Arm Demo
+          F.E.R.B. Arm Overview
         </motion.span>
 
         <motion.h1
@@ -123,7 +123,7 @@ function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          Showcasing a Robotic Arm Built to Perform IRL
+          Showcasing the<br /> <span className="text-blue-400">F</span>ully <span className="text-blue-400">E</span>ngineered <span className="text-blue-400">R</span>obotic <span className="text-blue-400">B</span>eing
         </motion.h1>
 
         <motion.p
