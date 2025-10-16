@@ -41,9 +41,6 @@ export default function ArmDashboard() {
       void _error;
       return 'Failed to connect to backend server. Please ensure the backend is running.';
     },
-    autoReconnect: false, // Disable auto-reconnect to prevent flooding
-    autoReconnectDelayMs: 10000, // 10 second delay if enabled
-    maxReconnectAttempts: 3,
   });
 
   const { connected, loading: connecting, reconnecting, error } = connectionStatus;

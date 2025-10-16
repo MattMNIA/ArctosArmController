@@ -6,7 +6,6 @@ import LandingPage from './pages/LandingPage';
 import RobotControl from './pages/RobotControl';
 import MotorStatus from './pages/MotorStatus';
 import ArmDashboard from './pages/ArmDashboard';
-import SimulationVideo from './pages/SimulationVideo';
 import MotorHoming from './pages/MotorHoming';
 import ArmVisualization from './pages/ArmVisualization';
 import MotorConfig from './pages/MotorConfig';
@@ -49,8 +48,6 @@ function App() {
         return allowPrivate ? <MotorStatus /> : <LandingPage />;
       case 'dashboard':
         return allowPrivate ? <ArmDashboard /> : <LandingPage />;
-      case 'simulation':
-        return allowPrivate ? <SimulationVideo /> : <LandingPage />;
       case 'homing':
         return allowPrivate ? <MotorHoming /> : <LandingPage />;
       case 'visualization':

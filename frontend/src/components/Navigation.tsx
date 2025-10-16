@@ -22,11 +22,13 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'status', label: 'Motor Status', public: false },
     { id: 'dashboard', label: 'Arm Dashboard', public: false },
     // show these only for you (private build or local dev)
-    { id: 'simulation', label: 'Simulation Video', public: false },
     { id: 'homing', label: 'Motor Homing', public: false },
     { id: 'config', label: 'Motor Config', public: false },
     { id: 'visualization', label: '3D Visualization', public: false },
   ].filter((i) => (allowPrivateNav ? true : i.public));
+
+  const desktopNavIds = ['landing', 'control', 'status', 'dashboard', 'simulation', 'homing', 'visualization'];
+  const desktopNavItems = navItems.filter((item) => desktopNavIds.includes(item.id));
 
   // keep an activeSection in sync with currentPage for styling parity
   const [activeSection, setActiveSection] = useState(currentPage);
@@ -62,9 +64,9 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="hidden md:flex items-center space-x-8"
+          className="hidden md:flex items-center space-x-6 ml-auto"
         >
-          {navItems.slice(0,5).map((item) => (
+          {desktopNavItems.map((item) => (
             <button
               key={item.id}
               type="button"
