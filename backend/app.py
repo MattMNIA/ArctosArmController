@@ -8,6 +8,7 @@ warnings.filterwarnings(
 from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+import logging
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
 from api.teleop_routes import teleop_bp
@@ -16,9 +17,9 @@ from api.sim_routes import sim_bp
 from api.config_routes import config_bp
 from api.ws_routes import init_websocket_events, has_active_connections
 from api.camera_routes import camera_bp
-from core.drivers import composite_driver
-from core.motion_service import MotionService
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
+from core.motion_service import MotionService
+from core.ik.analytic import AnalyticIKSolver
 from core.teleop_controller import TeleopController
 from core.input.keyboard_input import KeyboardController
 from core.input.xbox_input import XboxController
@@ -30,7 +31,15 @@ import time
 
 import argparse
 
-socketio = SocketIO(cors_allowed_origins="*")
+# Initialize Socket.IO with proper configuration
+socketio = SocketIO(
+    cors_allowed_origins="*",
+    async_mode='threading',
+    engineio_logger=False,
+    logger=False,
+    ping_timeout=120,
+    ping_interval=25
+)
 
 def run_teleop_loop(teleop_controller):
     """Run the teleoperation control loop."""
@@ -48,6 +57,8 @@ def create_app(drivers_list):
     app = Flask(__name__)
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
+    logger = logging.getLogger(__name__)
+    
     # Initialize Drivers
     drivers = []
     if 'sim' in drivers_list:
@@ -62,10 +73,34 @@ def create_app(drivers_list):
     comp_driver = CompositeDriver(drivers)
     # Initialize MotionService
     motion_service = MotionService(driver=comp_driver, loop_hz=50)
-    motion_service.ws_emit = lambda event, data: socketio.emit(event, data)
+    
+    # Create a function to emit events from the motion service thread
+    def emit_event(event, data):
+        """Emit events from motion service thread."""
+        try:
+            # Emit to all connected clients (namespace='/')
+            socketio.emit(event, data, namespace='/')
+        except Exception as e:
+            # Silent fail - no clients connected or connection error
+            logger.debug(f"Failed to emit {event}: {e}")
+    
+    motion_service.ws_emit = emit_event
     motion_service.has_active_connections = has_active_connections
     app.config['motion_service'] = motion_service
-    motion_service.start()
+
+    # Initialize IK Solver
+    try:
+        ik_solver = AnalyticIKSolver(r"backend\models\urdf\arctos_urdf.urdf")
+        app.config['ik_solver'] = ik_solver
+        print("IK solver initialized successfully")
+    except ImportError as e:
+        print(f"Warning: IK solver not available (PyBullet not installed): {e}")
+        print("IK functionality will be disabled")
+        app.config['ik_solver'] = None
+    except Exception as e:
+        print(f"Warning: Failed to initialize IK solver: {e}")
+        print("IK functionality will be disabled")
+        app.config['ik_solver'] = None
 
     # Register blueprints
     app.register_blueprint(ik_bp, url_prefix='/api/ik')
@@ -76,8 +111,16 @@ def create_app(drivers_list):
     app.register_blueprint(config_bp, url_prefix='/api/config')
     app.register_blueprint(camera_bp, url_prefix='/api/camera')
 
-    # Initialize WebSocket event handlers
+    # Add a simple health check endpoint
+    @app.route('/health', methods=['GET'])
+    def health():
+        return {'status': 'ok', 'motion_service_running': motion_service.running}
+
+    # Initialize WebSocket event handlers BEFORE starting motion service
     init_websocket_events(socketio)
+    
+    # NOW start the motion service (after WebSocket handlers are registered)
+    motion_service.start()
 
     return app
 

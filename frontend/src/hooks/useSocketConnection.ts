@@ -43,6 +43,31 @@ export function useSocketConnection(
   const socketRef = useRef<Socket | null>(null);
   const handlersCleanupRef = useRef<(() => void) | null>(null);
   const timeoutRef = useRef<number | null>(null);
+  const registerHandlersRef = useRef(registerHandlers);
+  const onConnectRef = useRef(onConnect);
+  const onDisconnectRef = useRef(onDisconnect);
+  const onConnectErrorRef = useRef(onConnectError);
+  const socketOptionsRef = useRef(socketOptions);
+
+  useEffect(() => {
+    registerHandlersRef.current = registerHandlers;
+  }, [registerHandlers]);
+
+  useEffect(() => {
+    onConnectRef.current = onConnect;
+  }, [onConnect]);
+
+  useEffect(() => {
+    onDisconnectRef.current = onDisconnect;
+  }, [onDisconnect]);
+
+  useEffect(() => {
+    onConnectErrorRef.current = onConnectError;
+  }, [onConnectError]);
+
+  useEffect(() => {
+    socketOptionsRef.current = socketOptions;
+  }, [socketOptions]);
 
   const [status, setStatus] = useState<SocketStatus>({
     ...defaultStatus,
@@ -57,8 +82,8 @@ export function useSocketConnection(
   }, []);
 
   const teardownSocket = useCallback(() => {
-  handlersCleanupRef.current?.();
-  handlersCleanupRef.current = null;
+    handlersCleanupRef.current?.();
+    handlersCleanupRef.current = null;
 
     if (socketRef.current) {
       socketRef.current.off('connect');
@@ -85,31 +110,33 @@ export function useSocketConnection(
       transports: ['websocket', 'polling'],
       timeout: 5000,
       forceNew: true,
-      ...socketOptions,
+      ...socketOptionsRef.current,
     });
 
     socketRef.current = socket;
 
-    if (registerHandlers) {
-  const cleanup = registerHandlers(socket);
-  handlersCleanupRef.current = cleanup ?? null;
+    // Register custom handlers BEFORE setting up connection listeners
+    // This ensures we don't miss events that fire immediately on connect
+    if (registerHandlersRef.current) {
+      const cleanup = registerHandlersRef.current(socket);
+      handlersCleanupRef.current = cleanup ?? null;
     }
 
     const handleConnect = () => {
       clearTimeoutRef();
       setStatus({ connected: true, loading: false, reconnecting: false, error: null });
-      onConnect?.(socket);
+      onConnectRef.current?.(socket);
     };
 
     const handleDisconnect = (reason: string) => {
       clearTimeoutRef();
       setStatus({ connected: false, loading: false, reconnecting: false, error: `Disconnected from server: ${reason}` });
-      onDisconnect?.(reason, socket);
+      onDisconnectRef.current?.(reason, socket);
     };
 
     const handleConnectError = (error: Error) => {
       clearTimeoutRef();
-      const message = onConnectError?.(error, socket) ?? error.message ?? 'Failed to connect to backend server.';
+      const message = onConnectErrorRef.current?.(error, socket) ?? error.message ?? 'Failed to connect to backend server.';
       setStatus({ connected: false, loading: false, reconnecting: false, error: message });
     };
 
@@ -128,14 +155,9 @@ export function useSocketConnection(
   }, [
     teardownSocket,
     url,
-    socketOptions,
-    registerHandlers,
     clearTimeoutRef,
     connectionTimeoutMs,
     timeoutMessage,
-    onConnect,
-    onDisconnect,
-    onConnectError,
   ]);
 
   const disconnect = useCallback(() => {

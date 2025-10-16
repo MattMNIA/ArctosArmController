@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Play, Calculator } from 'lucide-react';
+import { Play, Calculator, Target } from 'lucide-react';
 import { AnimatedButton } from './ui/AnimatedButton';
 
 interface JointControlProps {
@@ -9,6 +9,8 @@ interface JointControlProps {
   loading: boolean;
   onSolveIK: () => void;
   onExecuteMove: () => void;
+  onCalculateFK: () => void;
+  fkResult: { position: number[]; orientation: number[] } | null;
 }
 
 export default function JointControl({
@@ -17,7 +19,9 @@ export default function JointControl({
   connected,
   loading,
   onSolveIK,
-  onExecuteMove
+  onExecuteMove,
+  onCalculateFK,
+  fkResult
 }: JointControlProps) {
   return (
     <motion.div
@@ -56,6 +60,39 @@ export default function JointControl({
           </motion.div>
         ))}
 
+        {/* Forward Kinematics Results */}
+        {fkResult && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-gray-700/50 rounded-xl p-4 border border-gray-600"
+          >
+            <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center">
+              <Target className="w-4 h-4 mr-2" />
+              End Effector Pose
+            </h4>
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <span className="text-gray-400">Position:</span>
+                <div className="font-mono text-gray-200">
+                  X: {fkResult.position[0]?.toFixed(3)}<br />
+                  Y: {fkResult.position[1]?.toFixed(3)}<br />
+                  Z: {fkResult.position[2]?.toFixed(3)}
+                </div>
+              </div>
+              <div>
+                <span className="text-gray-400">Orientation:</span>
+                <div className="font-mono text-gray-200">
+                  W: {fkResult.orientation[0]?.toFixed(3)}<br />
+                  X: {fkResult.orientation[1]?.toFixed(3)}<br />
+                  Y: {fkResult.orientation[2]?.toFixed(3)}<br />
+                  Z: {fkResult.orientation[3]?.toFixed(3)}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         <div className="flex gap-4 mt-auto">
           <AnimatedButton
             onClick={onSolveIK}
@@ -65,6 +102,17 @@ export default function JointControl({
             leftIcon={<Calculator className="w-5 h-5" />}
           >
             {loading ? 'Solving...' : 'Solve IK'}
+          </AnimatedButton>
+
+          <AnimatedButton
+            onClick={onCalculateFK}
+            disabled={loading || !connected}
+            size="md"
+            className="flex-1"
+            variant="secondary"
+            leftIcon={<Target className="w-5 h-5" />}
+          >
+            {loading ? 'Calculating...' : 'Calculate FK'}
           </AnimatedButton>
 
           <AnimatedButton

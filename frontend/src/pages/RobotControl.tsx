@@ -14,15 +14,35 @@ export default function RobotControl() {
   const [jointInputs, setJointInputs] = useState<string[]>(['0','0','0','0','0','0']);
   const [gripperInput, setGripperInput] = useState<string>('0.0');
   const [loading, setLoading] = useState(false);
-  const statusHandler = useCallback((data: { msg: string }) => {
-    setMsg(data.msg);
-  }, []);
+  const [fkResult, setFkResult] = useState<{ position: number[]; orientation: number[] } | null>(null);
+  const [robotState, setRobotState] = useState<any>(null);
 
   const { status: connectionStatus, reconnect } = useSocketConnection('http://localhost:5000', {
-  registerHandlers: useCallback((socket: Socket) => {
-      socket.on('status', statusHandler);
-      return () => socket.off('status', statusHandler);
-    }, [statusHandler]),
+    registerHandlers: useCallback((socket: Socket) => {
+      const handleStatus = (data: { msg: string }) => {
+        setMsg(data.msg);
+      };
+
+      const handleTelemetry = (data: any) => {
+        setRobotState(data);
+        if (data.q && data.q.length > 0) {
+          // Convert radians to degrees for display
+          const jointsDegrees = data.q.map((j: number) => (j * 180 / Math.PI).toFixed(2).toString());
+          setJointInputs(jointsDegrees);
+        }
+        if (data.gripper_position !== undefined) {
+          setGripperInput(data.gripper_position.toString());
+        }
+      };
+
+      socket.on('status', handleStatus);
+      socket.on('telemetry', handleTelemetry);
+      
+      return () => {
+        socket.off('status', handleStatus);
+        socket.off('telemetry', handleTelemetry);
+      };
+    }, []),
     onConnect: () => setMsg('Connected to backend'),
     onDisconnect: () => setMsg('Disconnected from backend'),
     onConnectError: () => {
@@ -56,6 +76,33 @@ export default function RobotControl() {
       setJointInputs(newJoints.map(j => j.toString()));
     } catch (error) {
       console.error("IK solve failed:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateFK = async () => {
+    setLoading(true);
+    try {
+      const jointValues = jointInputs.map(j => parseFloat(j) || 0);
+      const res = await fetch("http://localhost:5000/api/ik/fk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          joints: jointValues.map((j: number) => j * Math.PI / 180) 
+        })
+      });
+      const data = await res.json();
+      if (data.position && data.orientation) {
+        setFkResult({
+          position: data.position,
+          orientation: data.orientation
+        });
+      } else {
+        console.error("Invalid FK response:", data);
+      }
+    } catch (error) {
+      console.error("FK calculation failed:", error);
     } finally {
       setLoading(false);
     }
@@ -178,7 +225,9 @@ export default function RobotControl() {
             connected={connected}
             loading={loading}
             onSolveIK={sendIK}
+            onCalculateFK={calculateFK}
             onExecuteMove={executeMove}
+            fkResult={fkResult}
           />
 
           <GripperControl

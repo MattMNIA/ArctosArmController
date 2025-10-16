@@ -23,6 +23,7 @@ export default function ArmDashboard() {
   const [jointInputs, setJointInputs] = useState<string[]>(['0','0','0','0','0','0']);
   const [jointLoading, setJointLoading] = useState(false);
   const [gripperInput, setGripperInput] = useState<string>('0.5');
+  const [fkResult, setFkResult] = useState<{ position: number[]; orientation: number[] } | null>(null);
   const handleTelemetry = useCallback((data: MotorStatus) => {
     setStatus(data);
     setInitialTelemetryReceived(true);
@@ -40,6 +41,9 @@ export default function ArmDashboard() {
       void _error;
       return 'Failed to connect to backend server. Please ensure the backend is running.';
     },
+    autoReconnect: false, // Disable auto-reconnect to prevent flooding
+    autoReconnectDelayMs: 10000, // 10 second delay if enabled
+    maxReconnectAttempts: 3,
   });
 
   const { connected, loading: connecting, reconnecting, error } = connectionStatus;
@@ -67,6 +71,33 @@ export default function ArmDashboard() {
       setJointInputs(newJoints.map(j => j.toString()));
     } catch (error) {
       console.error("IK solve failed:", error);
+    } finally {
+      setJointLoading(false);
+    }
+  };
+
+  const calculateFK = async () => {
+    setJointLoading(true);
+    try {
+      const jointValues = jointInputs.map(j => parseFloat(j) || 0);
+      const res = await fetch("http://localhost:5000/api/ik/fk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          joints: jointValues.map((j: number) => j * Math.PI / 180)
+        })
+      });
+      const data = await res.json();
+      if (data.position && data.orientation) {
+        setFkResult({
+          position: data.position,
+          orientation: data.orientation
+        });
+      } else {
+        console.error("Invalid FK response:", data);
+      }
+    } catch (error) {
+      console.error("FK calculation failed:", error);
     } finally {
       setJointLoading(false);
     }
@@ -221,7 +252,9 @@ export default function ArmDashboard() {
                 connected={connected}
                 loading={jointLoading}
                 onSolveIK={sendIK}
+                onCalculateFK={calculateFK}
                 onExecuteMove={executeMove}
+                fkResult={fkResult}
               />
             </div>
 
