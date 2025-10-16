@@ -65,7 +65,7 @@ def create_app(drivers_list):
         sim_driver = SimDriver()
         drivers.append(sim_driver)
     if 'pybullet' in drivers_list:
-        pybullet_driver = PyBulletDriver(gui=True, urdf_path="backend/models/urdf/arctos_urdf.urdf")
+        pybullet_driver = PyBulletDriver(gui=True, urdf_path=r"backend\models\urdf\arctos_urdf.urdf")
         drivers.append(pybullet_driver)
     if 'can' in drivers_list:
         can_driver = CanDriver()

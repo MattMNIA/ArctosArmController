@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Play, Calculator, Target } from 'lucide-react';
+import { Play, Target } from 'lucide-react';
 import { AnimatedButton } from './ui/AnimatedButton';
 
 interface JointControlProps {
@@ -7,9 +7,8 @@ interface JointControlProps {
   setJointInputs: (inputs: string[]) => void;
   connected: boolean;
   loading: boolean;
-  onSolveIK: () => void;
-  onExecuteMove: () => void;
   onCalculateFK: () => void;
+  onExecuteMove: () => void;
   fkResult: { position: number[]; orientation: number[] } | null;
 }
 
@@ -18,9 +17,8 @@ export default function JointControl({
   setJointInputs,
   connected,
   loading,
-  onSolveIK,
-  onExecuteMove,
   onCalculateFK,
+  onExecuteMove,
   fkResult
 }: JointControlProps) {
   return (
@@ -94,16 +92,6 @@ export default function JointControl({
         )}
 
         <div className="flex gap-4 mt-auto">
-          <AnimatedButton
-            onClick={onSolveIK}
-            disabled={loading || !connected}
-            size="md"
-            className="flex-1"
-            leftIcon={<Calculator className="w-5 h-5" />}
-          >
-            {loading ? 'Solving...' : 'Solve IK'}
-          </AnimatedButton>
-
           <AnimatedButton
             onClick={onCalculateFK}
             disabled={loading || !connected}
