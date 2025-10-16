@@ -78,12 +78,12 @@ class AnalyticIKSolver:
         """
         Solve inverse kinematics for the given target pose.
 
-        :param target_pose: Dict containing 'position' [x,y,z] and 'orientation' [x,y,z,w] quaternion
+        :param target_pose: Dict containing 'position' [x,y,z] and either 'orientation' [x,y,z,w] quaternion or 'euler' [roll, pitch, yaw] in radians. If both are provided, 'orientation' takes precedence.
         :param seed: Optional seed joint configuration
         :param max_iterations: Maximum number of iterations for convergence
         :param tolerance: Residual threshold for convergence
         :param refinement_iterations: Number of refinement iterations (FK -> IK loop)
-        :return: Dict with 'joints' list, 'success' bool, 'iterations' int
+        :return: Dict with 'joints' list, 'success' bool, 'iterations' int, 'error' float
         """
         if not self._is_initialized():
             return {
@@ -106,7 +106,15 @@ class AnalyticIKSolver:
             try:
                 # Extract position and orientation
                 position = target_pose.get('position', [0, 0, 0])
-                orientation = target_pose.get('orientation', [0, 0, 0, 1])  # quaternion
+                
+                # Handle orientation: prefer quaternion, fallback to Euler
+                if 'orientation' in target_pose:
+                    orientation = target_pose['orientation']
+                elif 'euler' in target_pose:
+                    euler_angles = target_pose['euler']  # [roll, pitch, yaw] in radians
+                    orientation = p.getQuaternionFromEuler(euler_angles)
+                else:
+                    orientation = [0, 0, 0, 1]  # default identity quaternion
 
                 # Set up the target transform
                 target_position = position
@@ -196,12 +204,13 @@ class AnalyticIKSolver:
         Compute forward kinematics for the given joint angles.
 
         :param joint_angles: List of joint angles (len must match num_joints)
-        :return: Dict with 'position' [x,y,z] and 'orientation' [x,y,z,w] quaternion
+        :return: Dict with 'position' [x,y,z], 'orientation' [x,y,z,w] quaternion, and 'euler' [roll, pitch, yaw] in radians
         """
         if not self._is_initialized():
             return {
                 "position": [0.0, 0.0, 0.0],
                 "orientation": [0.0, 0.0, 0.0, 1.0],
+                "euler": [0.0, 0.0, 0.0],
                 "error": "IK solver not initialized"
             }
 
@@ -209,6 +218,7 @@ class AnalyticIKSolver:
             return {
                 "position": [0.0, 0.0, 0.0],
                 "orientation": [0.0, 0.0, 0.0, 1.0],
+                "euler": [0.0, 0.0, 0.0],
                 "error": f"Expected {len(self.joint_indices)} joints, got {len(joint_angles)}"
             }
 
@@ -221,10 +231,12 @@ class AnalyticIKSolver:
             link_state = p.getLinkState(self.robot_id, self.end_effector_link_index)
             position = list(link_state[0])  # position
             orientation = list(link_state[1])  # orientation quaternion
+            euler_angles = p.getEulerFromQuaternion(orientation)  # Convert to Euler
 
             return {
                 "position": position,
-                "orientation": orientation
+                "orientation": orientation,
+                "euler": list(euler_angles)  # Add Euler angles for readability
             }
 
         except Exception as e:
@@ -232,5 +244,6 @@ class AnalyticIKSolver:
             return {
                 "position": [0.0, 0.0, 0.0],
                 "orientation": [0.0, 0.0, 0.0, 1.0],
+                "euler": [0.0, 0.0, 0.0],
                 "error": str(e)
             }

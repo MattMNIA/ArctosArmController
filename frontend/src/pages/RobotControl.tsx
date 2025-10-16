@@ -20,7 +20,19 @@ export default function RobotControl() {
   const inputsInitializedRef = useRef(false);
   const [ikPosition, setIkPosition] = useState<string[]>(['0.3', '0.1', '0.2']);
   const [ikOrientation, setIkOrientation] = useState<string[]>(['0', '0', '0', '1']);
+  const [useEulerAngles, setUseEulerAngles] = useState(false);
   const [solvedJoints, setSolvedJoints] = useState<number[] | null>(null);
+
+  // Handle orientation format changes
+  useEffect(() => {
+    if (useEulerAngles && ikOrientation.length === 4) {
+      // Switching to Euler: keep first 3 values (X, Y, Z from quaternion)
+      setIkOrientation(ikOrientation.slice(1, 4));
+    } else if (!useEulerAngles && ikOrientation.length === 3) {
+      // Switching to Quaternion: prepend 1 (W) and keep the rest
+      setIkOrientation(['1', ...ikOrientation]);
+    }
+  }, [useEulerAngles]);
 
   const { status: connectionStatus, reconnect } = useSocketConnection('http://localhost:5000', {
     registerHandlers: useCallback((socket: Socket) => {
@@ -71,11 +83,19 @@ export default function RobotControl() {
       const position = ikPosition.map(p => parseFloat(p) || 0);
       const orientation = ikOrientation.map(o => parseFloat(o) || 0);
       const seed = jointInputs.map(j => parseFloat(j) || 0).map(j => j * Math.PI / 180);
+      
+      const pose: any = { position };
+      if (useEulerAngles) {
+        pose.euler = orientation;
+      } else {
+        pose.orientation = orientation;
+      }
+      
       const res = await fetch("http://localhost:5000/api/ik/solve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          pose: { position, orientation }, 
+          pose, 
           seed
         })
       });
@@ -294,11 +314,24 @@ export default function RobotControl() {
               </div>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-300 mb-2">Target Orientation (quaternion)</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-300">
+                  Target Orientation {useEulerAngles ? '(Euler angles - radians)' : '(Quaternion)'}
+                </h3>
+                <label className="flex items-center space-x-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={useEulerAngles}
+                    onChange={(e) => setUseEulerAngles(e.target.checked)}
+                    className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-400">Use Euler Angles</span>
+                </label>
+              </div>
               <div className="space-y-2">
-                {['W', 'X', 'Y', 'Z'].map((comp, index) => (
+                {(useEulerAngles ? ['Roll', 'Pitch', 'Yaw'] : ['W', 'X', 'Y', 'Z']).map((comp, index) => (
                   <div key={comp} className="flex items-center space-x-2">
-                    <label className="text-sm text-gray-400 w-6">{comp}:</label>
+                    <label className="text-sm text-gray-400 w-12">{comp}:</label>
                     <input
                       type="number"
                       step="0.01"
