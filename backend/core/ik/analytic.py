@@ -74,12 +74,15 @@ class AnalyticIKSolver:
             self.physics_client = None
             self.robot_id = None
 
-    def solve(self, target_pose: Dict[str, Any], seed: Optional[List[float]] = None) -> Dict[str, Any]:
+    def solve(self, target_pose: Dict[str, Any], seed: Optional[List[float]] = None, max_iterations: int = 1000, tolerance: float = 1e-6, refinement_iterations: int = 3) -> Dict[str, Any]:
         """
         Solve inverse kinematics for the given target pose.
 
         :param target_pose: Dict containing 'position' [x,y,z] and 'orientation' [x,y,z,w] quaternion
-        :param seed: Optional seed joint configuration (not used in PyBullet IK)
+        :param seed: Optional seed joint configuration
+        :param max_iterations: Maximum number of iterations for convergence
+        :param tolerance: Residual threshold for convergence
+        :param refinement_iterations: Number of refinement iterations (FK -> IK loop)
         :return: Dict with 'joints' list, 'success' bool, 'iterations' int
         """
         if not self._is_initialized():
@@ -90,54 +93,97 @@ class AnalyticIKSolver:
                 "error": "IK solver not initialized"
             }
 
-        try:
-            # Extract position and orientation
-            position = target_pose.get('position', [0, 0, 0])
-            orientation = target_pose.get('orientation', [0, 0, 0, 1])  # quaternion
+        current_seed = seed
+        best_result: Dict[str, Any] = {
+            "joints": [0.0] * len(self.joint_indices),
+            "success": False,
+            "iterations": 0,
+            "error": "No solution found"
+        }
+        best_error = float('inf')
 
-            # Set up the target transform
-            target_position = position
-            target_orientation = orientation
+        for refinement in range(refinement_iterations):
+            try:
+                # Extract position and orientation
+                position = target_pose.get('position', [0, 0, 0])
+                orientation = target_pose.get('orientation', [0, 0, 0, 1])  # quaternion
 
-            # Use PyBullet's IK
-            joint_angles = p.calculateInverseKinematics(
-                self.robot_id,
-                self.end_effector_link_index,
-                target_position,
-                target_orientation,
-                lowerLimits=[-2.94, -0.889, -0.628, -2.94, -2.5, -2.94],  # from URDF limits
-                upperLimits=[2.94, 1.91, 1.45, 2.94, 2.5, 2.94],
-                jointRanges=[5.88, 2.799, 2.078, 5.88, 5.0, 5.88],  # ranges
-                restPoses=seed if seed and len(seed) == len(self.joint_indices) else [0.0] * len(self.joint_indices),
-                maxNumIterations=100,
-                residualThreshold=1e-4
-            )
+                # Set up the target transform
+                target_position = position
+                target_orientation = orientation
 
-            if joint_angles is None:
-                return {
-                    "joints": [0.0] * len(self.joint_indices),
-                    "success": False,
-                    "iterations": 100,
-                    "error": "PyBullet IK failed to converge"
-                }
+                # Use PyBullet's IK
+                joint_angles = p.calculateInverseKinematics(
+                    self.robot_id,
+                    self.end_effector_link_index,
+                    target_position,
+                    target_orientation,
+                    lowerLimits=[-2.94, -0.889, -0.628, -2.94, -2.5, -2.94],  # from URDF limits
+                    upperLimits=[2.94, 1.91, 1.45, 2.94, 2.5, 2.94],
+                    jointRanges=[5.88, 2.799, 2.078, 5.88, 5.0, 5.88],  # ranges
+                    restPoses=current_seed if current_seed and len(current_seed) == len(self.joint_indices) else [0.0] * len(self.joint_indices),
+                    maxNumIterations=max_iterations,
+                    residualThreshold=tolerance
+                )
 
-            # PyBullet returns all joint angles, but we only want the arm joints
-            arm_joints = joint_angles[:len(self.joint_indices)]
+                if joint_angles is None:
+                    if refinement == 0:
+                        return {
+                            "joints": [0.0] * len(self.joint_indices),
+                            "success": False,
+                            "iterations": max_iterations * refinement_iterations,
+                            "error": f"PyBullet IK failed to converge within {max_iterations * refinement_iterations} iterations"
+                        }
+                    continue
 
-            return {
-                "joints": list(arm_joints),
-                "success": True,
-                "iterations": 100  # PyBullet doesn't report actual iterations
-            }
+                # PyBullet returns all joint angles, but we only want the arm joints
+                arm_joints = joint_angles[:len(self.joint_indices)]
 
-        except Exception as e:
-            logger.error(f"IK solve failed: {e}")
-            return {
-                "joints": [0.0] * len(self.joint_indices),
-                "success": False,
-                "iterations": 0,
-                "error": str(e)
-            }
+                # Check accuracy by computing forward kinematics
+                fk_result = self.forward_kinematics(arm_joints)
+                if 'error' in fk_result:
+                    continue
+
+                # Calculate pose error
+                pos_error = np.linalg.norm(np.array(fk_result['position']) - np.array(target_position))
+                # Orientation error (simplified - could use quaternion distance)
+                ori_error = np.linalg.norm(np.array(fk_result['orientation']) - np.array(target_orientation))
+                total_error = pos_error + ori_error
+
+                if total_error < best_error:
+                    best_error = total_error
+                    best_result = {
+                        "joints": list(arm_joints),
+                        "success": True,
+                        "iterations": max_iterations * (refinement + 1),
+                        "error": total_error
+                    }
+
+                # If error is small enough, return
+                if total_error < tolerance:
+                    return {
+                        "joints": list(arm_joints),
+                        "success": True,
+                        "iterations": max_iterations * (refinement + 1),
+                        "error": total_error
+                    }
+
+                # Use current result as seed for next iteration
+                current_seed = arm_joints
+
+            except Exception as e:
+                logger.error(f"IK solve failed: {e}")
+                if refinement == 0:
+                    return {
+                        "joints": [0.0] * len(self.joint_indices),
+                        "success": False,
+                        "iterations": 0,
+                        "error": str(e)
+                    }
+                continue
+
+        # Return best result found
+        return best_result
 
     def _is_initialized(self) -> bool:
         """Check if the solver is properly initialized."""
