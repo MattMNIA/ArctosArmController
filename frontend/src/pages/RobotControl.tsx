@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
 import JointControl from '../components/JointControl';
@@ -16,6 +16,7 @@ export default function RobotControl() {
   const [loading, setLoading] = useState(false);
   const [fkResult, setFkResult] = useState<{ position: number[]; orientation: number[] } | null>(null);
   const [robotState, setRobotState] = useState<any>(null);
+  const inputsInitializedRef = useRef(false);
 
   const { status: connectionStatus, reconnect } = useSocketConnection('http://localhost:5000', {
     registerHandlers: useCallback((socket: Socket) => {
@@ -25,10 +26,11 @@ export default function RobotControl() {
 
       const handleTelemetry = (data: any) => {
         setRobotState(data);
-        if (data.q && data.q.length > 0) {
+        if (data.q && data.q.length > 0 && !inputsInitializedRef.current) {
           // Convert radians to degrees for display
           const jointsDegrees = data.q.map((j: number) => (j * 180 / Math.PI).toFixed(2).toString());
           setJointInputs(jointsDegrees);
+          inputsInitializedRef.current = true;
         }
         if (data.gripper_position !== undefined) {
           setGripperInput(data.gripper_position.toString());
