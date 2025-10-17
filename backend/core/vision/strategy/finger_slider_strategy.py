@@ -524,12 +524,11 @@ class FingerSliderStrategy:
     def _apply_smoothing(
         self, joint_index: Union[int, str], target: float, prev_values: Dict[Union[int, str], float]
     ) -> float:
-        target = self._clamp(target)
         if self._smoothing <= 0.0:
-            return target
+            return self._clamp(target)
         previous = prev_values.get(joint_index, 0.0)
-        smoothed = previous + self._smoothing * (target - previous)
-        return self._clamp(smoothed)
+        smoothed = previous + self._smoothing * (self._clamp(target) - previous)
+        return smoothed
 
     def _apply_deadzone(self, value: float) -> float:
         return 0.0 if abs(value) < self._current_deadzone else value
