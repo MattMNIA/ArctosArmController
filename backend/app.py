@@ -25,6 +25,7 @@ from core.input.keyboard_input import KeyboardController
 from core.input.xbox_input import XboxController
 from core.input.finger_input import FingerInput as FingerInputController
 from core.input.finger_slider_input import FingerSliderInput
+from core.input.object_centering_input import ObjectCenteringInput
 import utils.logger  # Import to trigger logging setup
 import threading
 import time
@@ -127,7 +128,13 @@ def create_app(drivers_list):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the Arctos Arm Controller")
     parser.add_argument('--drivers', nargs='+', choices=['sim', 'pybullet', 'can'], default=['can'], help="Specify which drivers to use")
-    parser.add_argument('--teleop', choices=['keyboard', 'xbox', 'fingers', 'finger-sliders'], help="Enable teleoperation with specified input device")
+    parser.add_argument('--teleop', choices=['keyboard', 'xbox', 'fingers', 'finger-sliders', 'object-centering'], help="Enable teleoperation with specified input device")
+    parser.add_argument('--center-label', default=None, help="Preferred detection label when using object-centering input")
+    parser.add_argument('--yolo-model', default=None, help="YOLO model path/name for object centering")
+    parser.add_argument('--no-show-vision', dest='show_vision', action='store_false', help="Hide the annotated camera feed when using object centering")
+    parser.set_defaults(show_vision=True)
+    parser.add_argument('--invert-horizontal', action='store_true', help="Invert horizontal centering direction")
+    parser.add_argument('--invert-vertical', action='store_true', help="Invert vertical centering direction")
     args = parser.parse_args()
     
     # Check if Xbox controller is connected
@@ -156,18 +163,31 @@ if __name__ == "__main__":
         
         # Run teleoperation in main thread (required for pygame input handling)
         print(f"Enabling teleoperation with {teleop_mode} input...")
+        motion_service = app.config['motion_service']
+        comp_driver = motion_service.driver
+
         if teleop_mode == 'xbox':
             input_controller = XboxController()
         elif teleop_mode == 'fingers':
             input_controller = FingerInputController()
         elif teleop_mode == 'finger-sliders':
             input_controller = FingerSliderInput(gesture_update_interval=0.1)  # ~33 Hz
+        elif teleop_mode == 'object-centering':
+            labels = [args.center_label] if args.center_label else None
+            input_controller = ObjectCenteringInput(
+                motion_service=motion_service,
+                driver=comp_driver,
+                detector_model=args.yolo_model,
+                preferred_labels=labels,
+                use_motion_queue=True,
+                display_feed=args.show_vision,
+                display_window_name="Object Centering",
+                invert_horizontal=args.invert_horizontal,
+                invert_vertical=args.invert_vertical,
+            )
         else:
             input_controller = KeyboardController()
-        
-        # Get the composite driver and motion service
-        comp_driver = app.config['motion_service'].driver
-        motion_service = app.config['motion_service']
+
         teleop_controller = TeleopController(input_controller, comp_driver, motion_service)
         
         print("Teleoperation enabled. Use your input device to control the arm. Press Ctrl+C to exit.")

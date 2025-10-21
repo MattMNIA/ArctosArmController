@@ -46,14 +46,16 @@ class RelativeMotionController:
         pose = self.ik_solver.forward_kinematics(current_joints)
         if 'error' in pose:
             logger.error(f"Failed to get current pose: {pose['error']}")
-            return {'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0, 1.0]}
-
+            return {'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0, 1.0], 'euler': [0.0, 0.0, 0.0]}
+        
+        # Add Euler angles for convenience
+        pose['euler'] = self._quaternion_to_euler(pose['orientation'])
         return pose
 
     def move_relative_translation(self, dx: float, dy: float, dz: float,
                                 frame: str = 'world', duration_s: Optional[float] = None) -> bool:
         """
-        Move the end effector by a relative translation vector.
+        Move the end effector by a relative translation vector using linear interpolation.
 
         :param dx: Translation in X direction (meters)
         :param dy: Translation in Y direction (meters)
@@ -66,7 +68,7 @@ class RelativeMotionController:
 
         # Compute new position based on frame
         if frame == 'world':
-            new_position = [
+            target_position = [
                 current_pose['position'][0] + dx,
                 current_pose['position'][1] + dy,
                 current_pose['position'][2] + dz
@@ -78,7 +80,7 @@ class RelativeMotionController:
             rotation_matrix = self._quaternion_to_rotation_matrix(orientation_quat)
             translation_world = rotation_matrix @ translation_local
 
-            new_position = [
+            target_position = [
                 current_pose['position'][0] + translation_world[0],
                 current_pose['position'][1] + translation_world[1],
                 current_pose['position'][2] + translation_world[2]
@@ -87,12 +89,18 @@ class RelativeMotionController:
             logger.error(f"Unsupported frame: {frame}")
             return False
 
-        # Keep current orientation for pure translational movement
+        # Calculate speed from duration if provided, otherwise use default
+        speed = 0.1  # Default speed of 0.1 m/s
+        if duration_s is not None and duration_s > 0:
+            distance = math.sqrt(dx**2 + dy**2 + dz**2)
+            if distance > 0:
+                speed = distance / duration_s
+    
         target_pose = {
-            'position': new_position,
-            'orientation': current_pose['orientation']
+            'position': target_position,
+            'orientation': current_pose['orientation']  # Keep current orientation
         }
-
+        
         return self._execute_pose_target(target_pose, duration_s)
 
     def move_relative_rotation(self, rx: float, ry: float, rz: float,
@@ -119,6 +127,7 @@ class RelativeMotionController:
                 current_euler[1] + ry,
                 current_euler[2] + rz
             ]
+            new_quat = self._euler_to_quaternion(new_euler)
         elif frame == 'local':
             # For local frame rotations, apply in end-effector frame
             # This is more complex - need to compose rotations properly
@@ -127,7 +136,6 @@ class RelativeMotionController:
             relative_quat = self._euler_to_quaternion([rx, ry, rz])
             # Compose: new_orientation = current_orientation * relative_rotation
             new_quat = self._quaternion_multiply(current_quat, relative_quat)
-            new_euler = self._quaternion_to_euler(new_quat)
         else:
             logger.error(f"Unsupported frame: {frame}")
             return False
@@ -135,7 +143,7 @@ class RelativeMotionController:
         # Keep current position for pure rotational movement
         target_pose = {
             'position': current_pose['position'],
-            'euler': new_euler
+            'orientation': new_quat
         }
 
         return self._execute_pose_target(target_pose, duration_s)
@@ -221,11 +229,11 @@ class RelativeMotionController:
 
     def _execute_pose_target(self, target_pose: Dict[str, Any], duration_s: Optional[float] = None, step_size_rad: float = 0.05) -> bool:
         """
-        Execute movement to a target pose using IK with incremental stepping for coordinated motion.
+        Execute movement to a target pose using IK.
 
         :param target_pose: Target pose dict
-        :param duration_s: Movement duration (per step)
-        :param step_size_rad: Maximum joint movement per step in radians
+        :param duration_s: Movement duration
+        :param step_size_rad: Unused, kept for compatibility
         :return: True if successful
         """
         # Get current joint angles as seed for IK solver
@@ -241,33 +249,10 @@ class RelativeMotionController:
 
         target_joints = ik_result['joints']
 
-        # Calculate joint differences
-        joint_diffs = [target - current for target, current in zip(target_joints, current_joints)]
-
-        # Calculate number of steps based on maximum joint movement
-        max_diff = max(abs(diff) for diff in joint_diffs) if joint_diffs else 0.0
-        if max_diff <= step_size_rad:
-            # Small movement, execute directly
-            command = JointCommand(q=target_joints, duration_s=duration_s)
-            self.motion_service.enqueue(command)
-            logger.info(f"Enqueued direct movement to joints: {target_joints}")
-        else:
-            # Large movement, break into steps
-            num_steps = int(math.ceil(max_diff / step_size_rad))
-            logger.info(f"Breaking large movement into {num_steps} steps (max_diff={max_diff:.4f} rad)")
-
-            for step in range(1, num_steps + 1):
-                # Calculate intermediate joint positions
-                fraction = step / num_steps
-                intermediate_joints = [
-                    current + diff * fraction
-                    for current, diff in zip(current_joints, joint_diffs)
-                ]
-
-                # Create and enqueue step command
-                command = JointCommand(q=intermediate_joints, duration_s=duration_s)
-                self.motion_service.enqueue(command)
-                logger.debug(f"Enqueued step {step}/{num_steps} to joints: {intermediate_joints}")
+        # Send the final target joints directly
+        command = JointCommand(q=target_joints, duration_s=duration_s)
+        self.motion_service.enqueue(command)
+        logger.info(f"Enqueued movement to joints: {target_joints}")
 
         return True
 
@@ -362,81 +347,3 @@ class RelativeMotionController:
         axis = cross / s
 
         return [axis[0], axis[1], axis[2], w]
-
-    def move_linearly_to(self, target_position: List[float], tool_speed: float,
-                         step_size: float = 0.01) -> bool:
-        """
-        Move the end effector in a straight line to a target Cartesian position.
-
-        This method implements linear interpolation in Cartesian space by breaking
-        the movement into small steps and using IK to convert each step to joint angles.
-
-        :param target_position: Target position [x, y, z] in meters
-        :param tool_speed: Desired speed of the end effector in m/s
-        :param step_size: Size of each linear step in meters
-        :return: True if movement was successfully planned and enqueued
-        """
-        if tool_speed <= 0:
-            logger.error("Tool speed must be a positive number")
-            return False
-
-        # Get current pose
-        current_pose = self.get_current_pose()
-        current_position = np.array(current_pose['position'])
-
-        # Calculate the straight line path
-        target_pos_array = np.array(target_position)
-        direction = target_pos_array - current_position
-        distance = float(np.linalg.norm(direction))
-
-        if distance < 1e-6:  # Negligible distance
-            logger.info("Target position is same as current. No move needed.")
-            return True
-
-        # Normalize direction
-        direction = direction / distance
-
-        # Calculate number of steps
-        num_steps = int(math.ceil(distance / step_size))
-        actual_step_size = distance / num_steps
-
-        # Calculate time per step for desired speed
-        time_per_step = actual_step_size / tool_speed
-
-        logger.info(f"Linear move: distance={distance:.3f}m, steps={num_steps}, "
-                   f"speed={tool_speed:.3f}m/s, step_time={time_per_step:.3f}s")
-
-        # Get current joint angles as starting point
-        feedback = self.motion_service.driver.get_feedback()
-        current_joints = feedback.get('q', [0.0] * 6)
-
-        # Generate intermediate poses along the straight line
-        for step in range(1, num_steps + 1):
-            # Calculate intermediate position
-            fraction = step / num_steps
-            intermediate_position = current_position + direction * distance * fraction
-
-            # Create target pose (keep current orientation)
-            target_pose = {
-                'position': intermediate_position.tolist(),
-                'orientation': current_pose['orientation']
-            }
-
-            # Solve IK for this pose
-            ik_result = self.ik_solver.solve(target_pose, seed=current_joints)
-            if not ik_result.get('success', False):
-                logger.error(f"IK failed for step {step}/{num_steps}: {ik_result.get('error', 'Unknown error')}")
-                return False
-
-            intermediate_joints = ik_result['joints']
-
-            # Create and enqueue joint command with timing
-            command = JointCommand(q=intermediate_joints, duration_s=float(time_per_step))
-            self.motion_service.enqueue(command)
-
-            # Update seed for next IK solve
-            current_joints = intermediate_joints
-
-            logger.debug(f"Enqueued step {step}/{num_steps} to position {intermediate_position}")
-
-        return True

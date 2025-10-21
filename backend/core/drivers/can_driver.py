@@ -1,5 +1,5 @@
 import logging
-from typing import Protocol, List, Dict, Any, Optional
+from typing import Protocol, List, Dict, Any, Optional, Sequence
 import platform
 import time
 import concurrent.futures
@@ -14,7 +14,6 @@ from can import BusABC
 from .mks_servo_can.mks_enums import EnableStatus, Direction, EndStopLevel
 from .mks_servo_can import mks_servo
 from .mks_servo_can.mks_servo import Enable
-from .motor import Motor
 from utils.config_manager import ConfigManager
 import threading
 
@@ -51,64 +50,37 @@ class CanDriver():
         self.servo_timeout = self.config_manager.get('can_driver.servo_timeout', 0.1)
         
         self.bus = None
-
+        self.servos = []
+        
         # Use a reasonable thread pool size and add proper shutdown
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=6,
+            max_workers=6, 
             thread_name_prefix="can_driver"
         )
-        self.pending_futures: List[concurrent.futures.Future] = []
+        self.pending_futures = []
         self.motion_service = None
         self.limit_hit = False
-
-        config_ids = list(self.motor_configs.keys())
-        highest_config_id = max(config_ids) if config_ids else -1
-        self.motor_count = max(len(self.gear_ratios), highest_config_id + 1, 6)
-
-        self.motors: List[Motor] = []
-        for motor_id in range(self.motor_count):
-            config = dict(self.get_motor_config(motor_id))
-            gear_ratio = self.gear_ratios[motor_id] if motor_id < len(self.gear_ratios) else 1.0
-            motor = Motor(
-                motor_id=motor_id,
-                can_id=motor_id + 1,
-                config=config,
-                encoder_resolution=self.encoder_resolution,
-                gear_ratio=gear_ratio,
-            )
-            self.motors.append(motor)
-
-        self.previous_limits = [[False, False] for _ in range(self.motor_count)]
-        self.current_limits = [[False, False] for _ in range(self.motor_count)]
-        self.velocity_direction: List[Optional[str]] = [None] * self.motor_count
-
+        self.previous_limits = [[False, False] for _ in range(6)]
+        self.current_limits = [[False, False] for _ in range(6)]  # Current endstop status
+        self.velocity_direction = [None] * 6  # type: List[Optional[str]]  # Track velocity direction for each motor
+        
         # Add locks for thread safety
-        self._servo_lock = threading.RLock()  # Reentrant lock for motor operations
+        self._servo_lock = threading.RLock()  # Reentrant lock for servo operations
         self._futures_lock = threading.Lock()  # For managing futures list
-        self.velocity_active = [False] * self.motor_count  # Track which joints have active velocity control
+        self.velocity_active = [False] * 6  # Track which joints have active velocity control
+        self._last_velocity_rpm = [0.0] * 6  # Track last commanded velocity per motor
 
     def get_motor_config(self, motor_id: int) -> dict:
         """Get speed, acceleration, and homing config for a motor."""
-        if motor_id not in self.motor_configs:
-            self.motor_configs[motor_id] = {
-                'speed_rpm': self.default_speed,
-                'acceleration': self.default_acc,
-                'homing_offset': 0,
-                'home_direction': 'CCW',
-                'home_speed': 50,
-                'offset_speed': 100,
-                'endstop_level': 'Low',
-            }
-        return self.motor_configs[motor_id]
-
-    def _get_motor(self, motor_id: int) -> Optional[Motor]:
-        if 0 <= motor_id < len(self.motors):
-            return self.motors[motor_id]
-        return None
-
-    def _motor_ready(self, motor_id: int) -> bool:
-        motor = self._get_motor(motor_id)
-        return bool(motor and motor.is_ready)
+        return self.motor_configs.get(motor_id, {
+            'speed_rpm': self.default_speed,
+            'acceleration': self.default_acc,
+            'homing_offset': 0,
+            'home_direction': 'CCW',
+            'home_speed': 50,
+            'offset_speed': 100,
+            'endstop_level': 'Low'
+        })
 
     def is_movement_allowed(self, motor_id: int, direction: str) -> bool:
         """
@@ -195,16 +167,22 @@ class CanDriver():
             motor_id: Motor ID (0-5)
             direction: 'CW' or 'CCW'
         """
-        motor = self._get_motor(motor_id)
-        if motor is None or not motor.is_ready:
+        if motor_id >= len(self.servos) or self.servos[motor_id] is None:
             return
-
+        
         try:
-            if self.velocity_active[motor_id] and self.velocity_direction[motor_id] == direction:
+            # Check if motor is in velocity mode and moving in the forbidden direction
+            if (self.velocity_active[motor_id] and 
+                self.velocity_direction[motor_id] == direction):
                 logger.info(f"Stopping motor {motor_id} velocity control in {direction} direction")
-                motor.stop_velocity()
+                self.servos[motor_id].stop_motor_in_speed_mode(255)
                 self.velocity_active[motor_id] = False
                 self.velocity_direction[motor_id] = None
+            
+            # Also check if motor is running absolute motion (harder to stop mid-motion)
+            # For now, we'll rely on the hardware endstops and velocity prevention
+            # If needed, we could add emergency stop here, but that might be too aggressive
+            
         except Exception as e:
             logger.error(f"Error stopping motor {motor_id}: {e}")
 
@@ -280,6 +258,103 @@ class CanDriver():
         
         return motor_scales
 
+    def _joints_to_motor_velocities(self, joint_velocities: Sequence[float]) -> Dict[int, float]:
+        """Convert joint angular velocities (rad/s) to motor velocities (rad/s)."""
+        num_joints = len(joint_velocities)
+        coupled_mode = self.config_manager.get('joints.coupled_mode', False)
+
+        if not coupled_mode or num_joints < 6:
+            return {i: joint_velocities[i] if i < num_joints else 0.0 for i in range(min(6, num_joints))}
+
+        motor_velocities: Dict[int, float] = {}
+        for i in range(6):
+            if i < 4:
+                motor_velocities[i] = joint_velocities[i] if i < num_joints else 0.0
+            else:
+                q4_dot = joint_velocities[4] if 4 < num_joints else 0.0
+                q5_dot = joint_velocities[5] if 5 < num_joints else 0.0
+                motor_velocities[4] = q4_dot + q5_dot
+                motor_velocities[5] = -q4_dot + q5_dot
+                break
+        return motor_velocities
+
+    @staticmethod
+    def _rad_s_to_rpm(rad_s: float) -> float:
+        return (rad_s * 60.0) / (2.0 * math.pi)
+
+    def stream_joint_velocities(self, joint_velocities: Sequence[float]) -> None:
+        """Continuously command joint velocities using speed-mode streaming."""
+        if self.bus is None:
+            logger.warning("CAN bus not initialized. Cannot stream joint velocities.")
+            return
+
+        velocities = list(joint_velocities)
+        if len(velocities) < 6:
+            velocities.extend([0.0] * (6 - len(velocities)))
+
+        motor_velocities = self._joints_to_motor_velocities(velocities)
+
+        with self._servo_lock:
+            for motor_id in range(min(6, len(self.servos))):
+                target_rad_s = motor_velocities.get(motor_id, 0.0)
+                target_rpm = self._rad_s_to_rpm(target_rad_s)
+
+                motor_config = self.get_motor_config(motor_id)
+                max_speed_rpm = abs(motor_config.get('speed_rpm', self.default_speed))
+
+                if abs(target_rpm) < 0.5:
+                    # Close enough to zero, stop motor smoothly if it was active
+                    if motor_id < len(self.servos) and self.velocity_active[motor_id]:
+                        try:
+                            self.servos[motor_id].stop_motor_in_speed_mode(motor_config.get('acceleration', self.default_acc))
+                        except Exception as exc:
+                            logger.debug(f"Failed to stop motor {motor_id} in speed mode: {exc}")
+                    self.velocity_active[motor_id] = False
+                    self.velocity_direction[motor_id] = None
+                    self._last_velocity_rpm[motor_id] = 0.0
+                    continue
+
+                # Clamp to motor limits
+                clamped_rpm = max(-max_speed_rpm, min(max_speed_rpm, target_rpm))
+                direction_str = 'CW' if clamped_rpm >= 0 else 'CCW'
+
+                if not self.is_movement_allowed(motor_id, direction_str):
+                    logger.debug(f"Velocity streaming blocked for motor {motor_id} due to limit constraint")
+                    continue
+
+                if abs(clamped_rpm - self._last_velocity_rpm[motor_id]) < 0.5:
+                    # Skip tiny updates to reduce bus noise
+                    continue
+
+                try:
+                    direction_enum = Direction.CW if clamped_rpm >= 0 else Direction.CCW
+                    abs_rpm = int(abs(clamped_rpm))
+                    acceleration = motor_config.get('acceleration', self.default_acc)
+                    self.servos[motor_id].run_motor_in_speed_mode(direction_enum, abs_rpm, acceleration)
+                    self.velocity_active[motor_id] = True
+                    self.velocity_direction[motor_id] = direction_str
+                    self._last_velocity_rpm[motor_id] = clamped_rpm
+                    logger.debug(
+                        "Streaming motor %d velocity: %.2f rad/s (%.1f RPM)",
+                        motor_id,
+                        target_rad_s,
+                        clamped_rpm,
+                    )
+                except Exception as exc:
+                    logger.error(f"Failed to stream velocity for motor {motor_id}: {exc}")
+
+    def stop_all_joint_velocities(self) -> None:
+        """Stop velocity mode on all joints."""
+        with self._servo_lock:
+            for motor_id in range(min(6, len(self.servos))):
+                try:
+                    self.servos[motor_id].stop_motor_in_speed_mode(255)
+                except Exception as exc:
+                    logger.debug(f"Failed to stop motor {motor_id} while clearing velocities: {exc}")
+                self.velocity_active[motor_id] = False
+                self.velocity_direction[motor_id] = None
+                self._last_velocity_rpm[motor_id] = 0.0
+
     def is_can_interface_up(self) -> bool:
         """
         Checks if the specified CAN interface is active.
@@ -330,6 +405,24 @@ class CanDriver():
         
         angle_rad = (encoder_value / (self.encoder_resolution * gear_ratio)) * (2 * math.pi)
         return angle_rad
+    
+    def _read_encoder_with_fallback(self, i: int, servo) -> int:
+        """Reads encoder value for a single axis with fallback to 0 on failure."""
+        try:
+            # Add timeout to prevent hanging
+            with self._servo_lock:
+                encoder_value = servo.read_encoder_value_addition()
+                if encoder_value is None:
+                    logger.warning(f"Failed to read encoder value for Axis {i}, setting to 0.")
+                    return 0
+                
+                # Invert encoder value for the first servo (axis 0)
+                if i == 0:
+                    encoder_value = -encoder_value
+                return encoder_value
+        except Exception as e:
+            logger.warning(f"Error reading encoder for Axis {i}: {e}")
+            return 0
     
     def connect(self) -> None: 
         """
@@ -384,7 +477,7 @@ class CanDriver():
                 thread_name_prefix="can_driver"
             )
         
-        logger.info("🔧 Initializing motors...")
+        logger.info("🔧 Initializing servos...")
         start_time = time.time()
 
         try:
@@ -393,41 +486,89 @@ class CanDriver():
             logger.error(f"❌ Failed to create CAN notifier: {e}")
             raise
 
-        ready_count = 0
         with self._servo_lock:
-            for motor in self.motors:
-                config = self.get_motor_config(motor.motor_id)
-                gear_ratio = self.gear_ratios[motor.motor_id] if motor.motor_id < len(self.gear_ratios) else motor.gear_ratio
-                motor.update_config(config, gear_ratio=gear_ratio, encoder_resolution=self.encoder_resolution)
+            for i in range(1, 7):
                 try:
-                    if motor.initialize(self.bus, notifier):
-                        logger.debug(f"✅ Motor {motor.motor_id} initialized.")
-                        ready_count += 1
-                        time.sleep(0.1)
-                    else:
-                        logger.error(f"❌ Failed to initialize motor ID {motor.motor_id + 1}")
+                    logger.debug(f"🔹 Creating servo instance for ID {i}")
+                    servo = mks_servo.MksServo(self.bus, notifier, i)
+                    
+                    # Add timeout for servo initialization
+                    servo.enable_motor(Enable.Enable)
+                    
+                    # Check enable status with retry
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        status = servo.read_en_pins_status()
+                        logger.debug(f"Servo {i} enable status (attempt {attempt+1}): {status}")
+                        
+                        # Check if endstop is triggered
+                        try:
+                            io_status = servo.read_io_port_status()
+                            endstop_triggered = io_status is not None and (io_status & 1 or io_status & 2)
+                        except Exception as e:
+                            logger.debug(f"Could not read IO status for servo {i}: {e}")
+                            endstop_triggered = False
+                        
+                        if status == EnableStatus.Enabled or endstop_triggered:
+                            logger.debug(f"Servo {i} considered enabled (status: {status}, endstop_triggered: {endstop_triggered})")
+                            break
+                        elif attempt < max_retries - 1:
+                            logger.warning(f"Servo {i} not enabled, retrying... (attempt {attempt+1}/{max_retries})")
+                            time.sleep(0.5)  # Wait before retry
+                        else:
+                            # Final attempt failed, log detailed status
+                            logger.error(f"Servo {i} failed to enable after {max_retries} attempts")
+                            logger.error(f"Final status: {status}, endstop_triggered: {endstop_triggered}")
+                            
+                            # Check if endstop might be the issue
+                            try:
+                                io_status = servo.read_io_port_status()
+                                logger.error(f"Servo {i} IO port status: {io_status} (bit 0=IN1, bit 1=IN2)")
+                            except Exception as e:
+                                logger.error(f"Could not read IO status for servo {i}: {e}")
+                            
+                            raise RuntimeError(f"Failed to enable servo ID {i} - status: {status}")
+                    self.servos.append(servo)
+                    logger.debug(f"✅ Servo {i} initialized.")
+                    
+                    # Small delay between servo initializations
+                    time.sleep(0.1)
+                    
                 except Exception as e:
-                    logger.error(f"❌ Error initializing motor ID {motor.motor_id + 1}: {e}")
+                    logger.error(f"❌ Failed to initialize servo ID {i}: {e}")
+                    # Don't raise immediately, try to initialize other servos
+                    continue
 
-            if ready_count == 0:
-                raise RuntimeError("No motors were successfully initialized")
+            if not self.servos:
+                raise RuntimeError("No servos were successfully initialized")
 
-            for motor in self.motors:
-                if motor.motor_id >= 2 and motor.is_ready:
-                    motor.enable_limit_port()
-
-        for motor in self.motors:
-            if not motor.is_ready:
-                continue
+            # Enable limit ports on servos 3–6 (Index 2 and above)
+            for index, servo in enumerate(self.servos[2:], start=3):
+                try:
+                    logger.debug(f"🔸 Enabling limit port on Servo {index}")
+                    servo.set_limit_port_remap(Enable.Enable)
+                    time.sleep(0.1)
+                    logger.debug(f"✅ Limit port enabled on Servo {index}")
+                except Exception as e:
+                    logger.error(f"⚠️ Failed to enable limit port on Servo {index}: {e}")
+        for i, servo in enumerate(self.servos, start=1):
             try:
-                if not motor.verify_enabled():
-                    raise RuntimeError(f"Failed to enable motor ID {motor.motor_id + 1}")
+                status = servo.read_en_pins_status()
+                # Check if endstop is triggered
+                try:
+                    io_status = servo.read_io_port_status()
+                    endstop_triggered = io_status is not None and (io_status & 1 or io_status & 2)
+                except Exception as e:
+                    logger.debug(f"Could not read IO status for servo {i}: {e}")
+                    endstop_triggered = False
+                
+                if status is not EnableStatus.Enabled and not endstop_triggered:
+                    raise RuntimeError(f"Failed to enable servo ID {i} - status: {status}, endstop_triggered: {endstop_triggered}")
             except Exception as e:
-                logger.error(f"Error checking enable status for motor ID {motor.motor_id + 1}: {e}")
+                logger.error(f"Error checking enable status for servo ID {i}: {e}")
                 raise
-
         duration = time.time() - start_time
-        logger.info(f"✅ {ready_count} motors initialized in {duration:.2f} seconds.")
+        logger.info(f"✅ {len(self.servos)} servos initialized in {duration:.2f} seconds.")
 
     def disable(self) -> None:
         """
@@ -442,27 +583,31 @@ class CanDriver():
         self._cancel_pending_futures()
         
         with self._servo_lock:
-            ready_motors = [motor for motor in self.motors if motor.is_ready]
-            if not ready_motors:
-                logger.warning("No motors to disable.")
+            if not self.servos:
+                logger.warning("No servos to disable.")
                 return
-
-            logger.info("🔧 Disabling motors...")
+            
+            logger.info("🔧 Disabling servos...")
             start_time = time.time()
 
-            for motor in ready_motors:
+            try:
+                notifier = can.Notifier(cast(BusABC, self.bus), [])
+            except Exception as e:
+                logger.error(f"❌ Failed to create CAN notifier: {e}")
+
+            for i, servo in enumerate(self.servos, start=1):
                 try:
-                    logger.debug(f"🔹 Disabling motor ID {motor.motor_id + 1}")
-                    motor.disable()
-                    logger.debug(f"✅ Motor {motor.motor_id + 1} disabled.")
+                    logger.debug(f"🔹 Disabling servo ID {i}")
+                    servo.disable_motor(Enable.Enable)
+                    logger.debug(f"✅ Servo {i} disabled.")
                 except Exception as e:
-                    logger.warning(f"❌ Failed to disable motor ID {motor.motor_id + 1}: {e}")
+                    logger.warning(f"❌ Failed to disable servo ID {i}: {e}")
+                    # Continue with other servos
+                
+            self.servos = []  # Clear the list after disabling
                 
         duration = time.time() - start_time
         logger.info(f"✅ All servos disabled in {duration:.2f} seconds.")
-        
-        self.velocity_active = [False] * self.motor_count
-        self.velocity_direction = [None] * self.motor_count
         
         # Shutdown thread pool
         try:
@@ -474,11 +619,7 @@ class CanDriver():
     def home(self) -> None: 
         """Home all axes using configured homing parameters."""
         # Home all joints (0-5)
-        ready_indices = [idx for idx, motor in enumerate(self.motors) if motor.is_ready]
-        if not ready_indices:
-            logger.warning("Motors not enabled. Call enable() first.")
-            return
-        self.home_joints(ready_indices)
+        self.home_joints(list(range(len(self.servos))))
 
     def home_joints(self, joint_indices: List[int]) -> None:
         """Home specific joints using the configured homing parameters.
@@ -493,8 +634,8 @@ class CanDriver():
             return
         
         with self._servo_lock:
-            if not any(motor.is_ready for motor in self.motors):
-                logger.warning("Motors not enabled. Call enable() first.")
+            if not self.servos:
+                logger.warning("Servos not enabled. Call enable() first.")
                 return
 
         # Cancel any pending futures before starting homing
@@ -505,7 +646,7 @@ class CanDriver():
         joint_5_selected = 5 in joint_indices
         
         # Extract standard joints (0-3) to home concurrently
-        standard_joints = [idx for idx in joint_indices if idx < 4 and self._motor_ready(idx)]
+        standard_joints = [idx for idx in joint_indices if idx < 4]
         
         # Create a list of futures to track all homing tasks
         futures = []
@@ -522,11 +663,8 @@ class CanDriver():
             try:
                 # Submit standard joints (0-3) for concurrent homing
                 for joint_idx in standard_joints:
-                    if joint_idx < 0 or joint_idx >= len(self.motors):
-                        logger.error(f"Invalid joint index {joint_idx}, must be between 0 and {len(self.motors) - 1}")
-                        continue
-                    if not self._motor_ready(joint_idx):
-                        logger.warning(f"Motor {joint_idx} not ready for homing")
+                    if joint_idx < 0 or joint_idx >= len(self.servos):
+                        logger.error(f"Invalid joint index {joint_idx}, must be between 0 and {len(self.servos)-1}")
                         continue
                     future = self.thread_pool.submit(self._home_standard_joint, joint_idx)
                     futures.append(future)
@@ -576,29 +714,29 @@ class CanDriver():
         
         This method is used for joints 0-3 which use standard homing procedures.
         """
-        motor = self._get_motor(joint_idx)
-        if motor is None or not motor.is_ready:
-            logger.warning(f"Motor {joint_idx} not ready for homing")
-            return
-
+        servo = self.servos[joint_idx]
+        motor_config = self.get_motor_config(joint_idx)
+        
         try:
             logger.info(f"Homing joint {joint_idx} using standard method")
-
-            motor.run_builtin_home()
-            while motor.is_running():
+            
+            # Use standard homing for motors 0-3
+            servo.b_go_home()
+            while servo.is_motor_running():
                 time.sleep(0.05)
-
-            homing_offset = motor.homing_offset
+            
+            # Apply homing offset if configured
+            homing_offset = motor_config.get("homing_offset", 0)
             if homing_offset != 0:
-                offset_speed = motor.offset_speed
+                offset_speed = abs(motor_config.get("offset_speed", 50))
                 logger.info(f"Applying homing offset {homing_offset} to joint {joint_idx}")
-                motor.run_relative_motion(offset_speed, 150, homing_offset)
-                while motor.is_running():
+                servo.run_motor_relative_motion_by_axis(offset_speed, 150, int(homing_offset))
+                while servo.is_motor_running():
                     time.sleep(0.05)
-
-            motor.set_zero()
+            
+            servo.set_current_axis_to_zero()
             logger.info(f"Successfully homed joint {joint_idx}")
-
+            
         except Exception as e:
             logger.error(f"Failed to home joint {joint_idx}: {e}")
             raise
@@ -626,67 +764,85 @@ class CanDriver():
         """
         logger.info("Homing joint 4 using opposite-directions method")
         
-        motor5 = self._get_motor(4)
-        motor6 = self._get_motor(5)
-
-        if not self._motor_ready(4) or not self._motor_ready(5) or motor5 is None or motor6 is None:
-            logger.warning("Motors 5 and 6 must be ready for joint 4 homing")
-            return
-
-        offset5 = motor5.homing_offset
-        offset_speed5 = motor5.offset_speed
-        offset_speed6 = motor6.offset_speed
-        home_speed5 = motor5.home_speed
-        home_speed6 = motor6.home_speed
-        home_dir_5 = motor5.home_direction
-
+        # Get servo instances
+        servo5 = self.servos[4]  # Motor 5 (joint index 4)
+        servo6 = self.servos[5]  # Motor 6 (joint index 5)
+        
+        # Get motor configurations
+        config5 = self.get_motor_config(4)  # Motor 5
+        config6 = self.get_motor_config(5)  # Motor 6
+        
+        # Get homing parameters 
+        offset5 = config5.get("homing_offset", 25000)
+        logger.info(f"offset5: {offset5}")
+        
+        # Get homing speeds and directions from motor configs
+        offset_speed5 = abs(config5.get("offset_speed", 80))
+        offset_speed6 = abs(config6.get("offset_speed", 80))
+        home_speed5 = config5.get("home_speed", 80)
+        home_speed6 = config6.get("home_speed", 80)
+        home_dir_5 = config5.get("home_direction", "CCW")
+        
+        # Use the higher speed for coordinated movements
         coord_speed = max(home_speed5, home_speed6)
         offset_speed = max(offset_speed5, offset_speed6)
-
+        
         logger.info(f"Joint 4 homing: speed={coord_speed}, offset={offset5}")
+        
+        # Phase 1: Move both motors in OPPOSITE directions until motor 5's endstop is hit
         logger.info("Phase 1: Moving both motors in opposite directions until motor 5 endstop...")
 
+        # Determine direction - motor 5's homing direction
+        from .mks_servo_can.mks_enums import Direction
         direction_5 = Direction.CCW if home_dir_5.upper() == "CCW" else Direction.CW
         direction_6_opposite = Direction.CW if direction_5 == Direction.CCW else Direction.CCW
 
-        motor5.run_speed_mode(direction_5, coord_speed, 150)
-        motor6.run_speed_mode(direction_6_opposite, coord_speed, 150)
+        # Start both motors in opposite directions
+        servo5.run_motor_in_speed_mode(direction_5, coord_speed, 150)
+        servo6.run_motor_in_speed_mode(direction_6_opposite, coord_speed, 150)
 
+        # Wait for motor 5's limit switch
         limit_hit = False
         max_wait_time = 30.0
         start_time = time.time()
 
         while not limit_hit and (time.time() - start_time) < max_wait_time:
             try:
-                io_status = motor5.read_io_port_status()
+                io_status = servo5.read_io_port_status()  # Check motor 5's endstop
                 if io_status is not None:
                     limit1_triggered = bool(io_status & 0x01)
+                    # Assuming Low level endstop
                     limit_hit = not limit1_triggered
+
                     if limit_hit:
                         logger.info(f"Motor 5 endstop triggered (IO: 0x{io_status:02X})")
                         break
+
                 time.sleep(0.05)
+
             except Exception as e:
                 logger.warning(f"Error reading motor 5 IO status: {e}")
                 time.sleep(0.05)
 
-        motor5.stop_velocity(255)
-        motor6.stop_velocity(255)
+        # Stop both motors
+        servo5.stop_motor_in_speed_mode(255)
+        servo6.stop_motor_in_speed_mode(255)
         time.sleep(0.2)
 
         if not limit_hit:
             logger.warning("Timeout waiting for motor 5 endstop")
 
+        # Phase 2: Move both motors by motor 5's offset amount
         if offset5 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
-            motor5.run_relative_motion(offset_speed, 150, offset5)
-            motor6.run_relative_motion(offset_speed, 150, -offset5)
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
+            # Wait for both to complete
             time.sleep(0.1)
-            while motor5.is_running() or motor6.is_running():
+            while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
-
-        motor5.set_zero()
-        motor6.set_zero()
+        servo5.set_current_axis_to_zero()
+        servo6.set_current_axis_to_zero()
         logger.info("Joint 4 homing completed successfully")
         
     def _home_joint_5_same_direction(self) -> None:
@@ -696,71 +852,87 @@ class CanDriver():
         """
         logger.info("Homing joint 5 using same-direction method")
         
-        motor5 = self._get_motor(4)
-        motor6 = self._get_motor(5)
-
-        if not self._motor_ready(4) or not self._motor_ready(5) or motor5 is None or motor6 is None:
-            logger.warning("Motors 5 and 6 must be ready for joint 5 homing")
-            return
-
-        offset6 = motor6.homing_offset
-        offset_speed5 = motor5.offset_speed
-        offset_speed6 = motor6.offset_speed
-        home_speed5 = motor5.home_speed
-        home_speed6 = motor6.home_speed
-        home_dir_6 = motor6.home_direction
-
+        # Get servo instances
+        servo5 = self.servos[4]  # Motor 5 (joint index 4)
+        servo6 = self.servos[5]  # Motor 6 (joint index 5)
+        
+        # Get motor configurations
+        config5 = self.get_motor_config(4)  # Motor 5
+        config6 = self.get_motor_config(5)  # Motor 6
+        
+        # Get homing parameters
+        offset6 = config6.get("homing_offset", 20000)
+        
+        # Get homing speeds and directions from motor configs
+        offset_speed5 = abs(config5.get("offset_speed", 80))
+        offset_speed6 = abs(config6.get("offset_speed", 80))
+        home_speed5 = config5.get("home_speed", 80)
+        home_speed6 = config6.get("home_speed", 80)
+        home_dir_6 = config6.get("home_direction", "CCW")
+        
+        # Use the higher speed for coordinated movements
         coord_speed = max(home_speed5, home_speed6)
         offset_speed = max(offset_speed5, offset_speed6)
-
+        
         logger.info(f"Joint 5 homing: speed={coord_speed}, offset={offset6}")
+        
+        # Move both motors in SAME direction until motor 6's endstop is hit
         logger.info("Moving both motors in same direction until motor 6 endstop...")
-
         max_wait_time = 30.0
         start_time = time.time()
-
+        
+        # Motor 6 in its homing direction, motor 5 in same direction
+        from .mks_servo_can.mks_enums import Direction
         dir_6 = Direction.CCW if home_dir_6.upper() == "CCW" else Direction.CW
 
-        motor5.run_speed_mode(dir_6, coord_speed, 150)
-        motor6.run_speed_mode(dir_6, coord_speed, 150)
+        servo5.run_motor_in_speed_mode(dir_6, coord_speed, 150)
+        servo6.run_motor_in_speed_mode(dir_6, coord_speed, 150)
 
+        # Wait for motor 6's limit switch
         limit_hit = False
         while not limit_hit and (time.time() - start_time) < max_wait_time:
             try:
-                io_status = motor6.read_io_port_status()
+                io_status = servo6.read_io_port_status()  # Check motor 6's endstop
                 if io_status is not None:
                     limit1_triggered = bool(io_status & 0x01)
+                    # Assuming Low level endstop
                     limit_hit = not limit1_triggered
+
                     if limit_hit:
                         logger.info(f"Motor 6 endstop triggered (IO: 0x{io_status:02X})")
                         break
+
                 time.sleep(0.05)
+
             except Exception as e:
                 logger.warning(f"Error reading motor 6 IO status: {e}")
                 time.sleep(0.05)
                 
-        motor5.stop_velocity(255)
-        motor6.stop_velocity(255)
+        servo5.stop_motor_in_speed_mode(255)
+        servo6.stop_motor_in_speed_mode(255)
         time.sleep(0.2)
 
         if not limit_hit:
             logger.warning("Timeout waiting for motor 6 endstop")
 
+        # Apply offset if configured
         if offset6 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 6 offset ({offset6}) at speed {offset_speed}...")
-            motor5.run_relative_motion(offset_speed, 150, -offset6)
-            motor6.run_relative_motion(offset_speed, 150, -offset6)
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1* offset6)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 *offset6)
             time.sleep(0.2)
-            start_timeout = 2.0
+            # Wait for both to start moving
+            start_timeout = 2.0  # seconds
             start_time = time.time()
-            while not (motor5.is_running() and motor6.is_running()) and (time.time() - start_time) < start_timeout:
+            while not (servo5.is_motor_running() and servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
                 time.sleep(0.01)
 
-            while motor5.is_running() or motor6.is_running():
+            # Wait for both to complete
+            while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
                 
-        motor5.set_zero()
-        motor6.set_zero()
+        servo5.set_current_axis_to_zero()
+        servo6.set_current_axis_to_zero()
         logger.info("Joint 5 homing completed successfully")
 
 
@@ -799,8 +971,8 @@ class CanDriver():
             return
         
         with self._servo_lock:
-            if not any(motor.is_ready for motor in self.motors):
-                logger.warning("Motors not enabled. Call enable() first.")
+            if not self.servos:
+                logger.warning("Servos not enabled. Call enable() first.")
                 return
 
         # Validate input
@@ -818,34 +990,42 @@ class CanDriver():
                 encoder_val = self.angle_to_encoder(angle_rad, motor_id)
                 logger.debug(f"Motor {motor_id}: {math.degrees(angle_rad):.2f}° -> enc {encoder_val}")
                 
-                motor = self._get_motor(motor_id)
-                if motor is None or not motor.is_ready:
-                    logger.warning(f"Motor {motor_id} not ready for absolute move")
-                    return False
-
                 with self._servo_lock:
-                    current_encoder = motor.read_encoder()
-                    direction: Optional[str]
-                    if encoder_val > current_encoder:
-                        direction = 'CW'
-                    elif encoder_val < current_encoder:
-                        direction = 'CCW'
+                    if motor_id >= len(self.servos):
+                        logger.error(f"Servo index {motor_id} out of range")
+                        return False
+                    
+                    # Get current position to determine movement direction
+                    current_encoder = self._read_encoder_with_fallback(motor_id, self.servos[motor_id])
+                    if current_encoder is None:
+                        logger.warning(f"Could not read current position for motor {motor_id}, skipping movement check")
                     else:
-                        direction = None
-
-                    if direction and not self.is_movement_allowed(motor_id, direction):
-                        logger.warning(
-                            f"Absolute movement not allowed for motor {motor_id} in direction {direction} due to coupled endstop constraint"
-                        )
+                        # Determine direction
+                        if encoder_val > current_encoder:
+                            direction = 'CW'
+                        elif encoder_val < current_encoder:
+                            direction = 'CCW'
+                        else:
+                            direction = None  # No movement
+                        
+                        # Check if movement is allowed
+                        if direction and not self.is_movement_allowed(motor_id, direction):
+                            logger.warning(f"Absolute movement not allowed for motor {motor_id} in direction {direction} due to coupled endstop constraint")
+                            return False
+                    
+                    # Get motor-specific speed and acceleration
+                    motor_config = self.get_motor_config(motor_id)
+                    speed = abs(motor_config['speed_rpm'])
+                    acc = motor_config['acceleration']
+                    
+                    result = self.servos[motor_id].run_motor_absolute_motion_by_axis(
+                        speed, acc, encoder_val
+                    )
+                    
+                    if result is None:
+                        logger.warning(f"Failed to send command to servo {motor_id+1}")
                         return False
-
-                    speed = motor.max_speed_rpm
-                    acc = motor.acceleration
-
-                    if not motor.move_to_encoder(encoder_val, speed, acc):
-                        logger.warning(f"Failed to send command to motor {motor_id + 1}")
-                        return False
-
+                    
                     return True
                     
             except Exception as e:
@@ -860,8 +1040,8 @@ class CanDriver():
         with self._futures_lock:
             try:
                 for motor_id, angle in motor_commands.items():
-                    if not self._motor_ready(motor_id):
-                        logger.warning(f"Skipping motor {motor_id}, not ready")
+                    if motor_id >= len(self.servos):
+                        logger.warning(f"Skipping motor {motor_id}, no corresponding servo")
                         continue
                     
                     future = self.thread_pool.submit(_move_servo, motor_id, angle)
@@ -976,8 +1156,8 @@ class CanDriver():
     def get_feedback(self) -> Dict[str, Any]:
         """Get robot feedback with improved error handling."""
         with self._servo_lock:
-            if not any(motor.is_ready for motor in self.motors):
-                logger.warning("Motors not enabled.")
+            if not self.servos:
+                logger.warning("Servos not enabled.")
                 return {"q": [], "dq": [], "error": [], "limits": []}
         
         q = []
@@ -985,58 +1165,61 @@ class CanDriver():
         limits = []
         
         with self._servo_lock:
-            motor_angles: List[float] = []
-            motor_encoders: List[int] = []
-            for i, motor in enumerate(self.motors):
-                if not motor.is_ready:
-                    motor_encoders.append(0)
-                    motor_angles.append(0.0)
-                    continue
-                encoder_value = motor.read_encoder()
+            # Read joint positions
+            motor_angles = []
+            motor_encoders = []
+            for i, servo in enumerate(self.servos):
+                encoder_value = self._read_encoder_with_fallback(i, servo)
                 motor_encoders.append(encoder_value)
-                angle_rad = motor.encoder_to_angle(encoder_value)
+                angle_rad = self.encoder_to_angle(encoder_value, i)
                 motor_angles.append(angle_rad)
-
+            
+            # Convert motor angles to joint angles for coupled mode
             coupled_mode = self.config_manager.get('joints.coupled_mode', False)
             if coupled_mode and len(motor_angles) >= 6:
+                # For coupled joints 4 and 5
                 motor4_angle = motor_angles[4]
                 motor5_angle = motor_angles[5]
+                
+                # Inverse kinematics for coupled joints
                 joint4 = (motor4_angle - motor5_angle) / 2
                 joint5 = (motor4_angle + motor5_angle) / 2
+                
                 q = motor_angles[:4] + [joint4, joint5]
             else:
                 q = motor_angles
-
-            for i, motor in enumerate(self.motors):
-                if not motor.is_ready:
-                    dq.append(0.0)
-                    continue
+            
+            # Read joint velocities with error handling
+            for i, servo in enumerate(self.servos):
                 try:
-                    dq.append(motor.read_speed())
+                    speed = servo.read_motor_speed()
+                    dq.append(speed if speed is not None else 0.0)
                 except Exception as e:
-                    logger.warning(f"Error reading speed for motor {i}: {e}")
+                    logger.warning(f"Error reading speed for servo {i}: {e}")
                     dq.append(0.0)
-
-            for i, motor in enumerate(self.motors):
-                if not motor.is_ready:
-                    limits.append([False, False])
-                    continue
+            
+            # Read limit switch status
+            for i, servo in enumerate(self.servos):
                 try:
-                    status = motor.read_limits()
-                    limits.append(status if status is not None else [False, False])
+                    status = servo.read_io_port_status()
+                    if status is not None:
+                        in1 =  bool(status & 0x01)  # Bit 0: IN_1
+                        in2 =  bool((status >> 1) & 0x01)  # Bit 1: IN_2
+                        limits.append([in1, in2])
+                    else:
+                        limits.append([False, False])
                 except Exception as e:
-                    logger.warning(f"Error reading IO status for motor {i}: {e}")
+                    logger.warning(f"Error reading IO status for servo {i}: {e}")
                     limits.append([False, False])
-
+                    
+            # Read shaft angle error for each servo
             error = []
-            for i, motor in enumerate(self.motors):
-                if not motor.is_ready:
-                    error.append(0)
-                    continue
+            for i, servo in enumerate(self.servos):
                 try:
-                    error.append(motor.read_shaft_angle_error())
+                    err = servo.read_motor_shaft_angle_error()
+                    error.append(err if err is not None else 0)
                 except Exception as e:
-                    logger.warning(f"Error reading shaft angle error for motor {i}: {e}")
+                    logger.warning(f"Error reading shaft angle error for servo {i}: {e}")
                     error.append(0)
 
         # Update current limits for movement validation
@@ -1056,21 +1239,23 @@ class CanDriver():
         # Cancel all pending operations
         self._cancel_pending_futures()
         
-        with self._servo_lock:
-            ready_motors = [motor for motor in self.motors if motor.is_ready]
-            if not ready_motors:
-                logger.error("No motors initialized for emergency stop!")
-                return
+        self.stop_all_joint_velocities()
 
-            for motor in ready_motors:
+        with self._servo_lock:
+            if not self.servos:
+                logger.error("No servos initialized for emergency stop!")
+                return
+            
+            for i, servo in enumerate(self.servos):
                 try:
-                    motor.emergency_stop()
-                    logger.debug(f"Emergency stop sent to motor {motor.motor_id + 1}")
+                    result = servo.emergency_stop_motor()
+                    logger.debug(f"Emergency stop sent to servo {i+1}: {result}")
                 except Exception as e:
-                    logger.error(f"Failed to send emergency stop to motor {motor.motor_id + 1}: {e}")
+                    logger.error(f"Failed to send emergency stop to servo {i+1}: {e}")
         
         self.velocity_active = [False] * 6
         self.velocity_direction = [None] * 6
+        self._last_velocity_rpm = [0.0] * 6
 
     def start_joint_velocity(self, joint_index: int, scale: float) -> None:
         """
@@ -1093,28 +1278,36 @@ class CanDriver():
             motor_scales = self.joint_velocity_to_motors(joint_index, scale)
             
             for motor_id, motor_scale in motor_scales.items():
-                motor = self._get_motor(motor_id)
-                if motor is None or not motor.is_ready:
-                    logger.error(f"Motor index {motor_id} out of range or not ready")
+                if motor_id >= len(self.servos):
+                    logger.error(f"Servo index {motor_id} out of range")
                     continue
-
+                
                 if self.velocity_active[motor_id]:
+                    # Already active, no need to send again
                     continue
-
+                
                 try:
-                    direction_str = motor.direction_from_scale(motor_scale)
-                    if direction_str and not self.is_movement_allowed(motor_id, direction_str):
-                        logger.warning(
-                            f"Movement not allowed for motor {motor_id} in direction {direction_str} due to coupled endstop constraint"
-                        )
+                    # Get motor-specific config and scale speed
+                    motor_config = self.get_motor_config(motor_id)
+                    max_speed = motor_config['speed_rpm']
+                    motor_speed = motor_scale * max_speed
+                    
+                    direction = Direction.CW if motor_speed >= 0 else Direction.CCW
+                    abs_speed = abs(int(motor_speed))
+                    
+                    # Check if movement is allowed considering coupled endstops
+                    direction_str = 'CW' if direction == Direction.CW else 'CCW'
+                    if not self.is_movement_allowed(motor_id, direction_str):
+                        logger.warning(f"Movement not allowed for motor {motor_id} in direction {direction_str} due to coupled endstop constraint")
                         continue
-
-                    if motor.start_velocity_scale(motor_scale, motor.acceleration):
-                        self.velocity_active[motor_id] = True
-                        self.velocity_direction[motor_id] = direction_str
-                        logger.debug(
-                            f"Started velocity control for motor {motor_id}: scale={motor_scale}, nominal={motor.nominal_speed_rpm}"
-                        )
+                    
+                    # Get motor-specific acceleration
+                    acc = motor_config['acceleration']
+                    
+                    self.servos[motor_id].run_motor_in_speed_mode(direction, abs_speed, acc)
+                    self.velocity_active[motor_id] = True
+                    self.velocity_direction[motor_id] = direction_str
+                    logger.debug(f"Started velocity control for motor {motor_id}: speed={motor_speed} RPM (scale={motor_scale}, max={max_speed})")
                 except Exception as e:
                     logger.error(f"Failed to start velocity control for motor {motor_id}: {e}")
 
@@ -1135,14 +1328,14 @@ class CanDriver():
             motor_speeds = self.joint_velocity_to_motors(joint_index, 0)  # Speed doesn't matter for stopping
 
             for motor_id in motor_speeds.keys():
-                motor = self._get_motor(motor_id)
-                if motor is None or not motor.is_ready:
+                if motor_id < 0 or motor_id >= len(self.servos):
                     continue
 
                 try:
-                    motor.stop_velocity(acceleration)
+                    self.servos[motor_id].stop_motor_in_speed_mode(acceleration)
                     self.velocity_active[motor_id] = False
                     self.velocity_direction[motor_id] = None
+                    self._last_velocity_rpm[motor_id] = 0.0
                     logger.debug(f"Stopped velocity control for motor {motor_id} with acceleration {acceleration}")
                 except Exception as e:
                     logger.error(f"Failed to stop velocity control for motor {motor_id}: {e}")
@@ -1161,72 +1354,98 @@ class CanDriver():
         
         # Check if any servo is at limit and stopped
         for i, (lim, vel) in enumerate(zip(limits, dq)):
-            # Check if any limit is hit (assuming False means limit hit)
+            # Check if any limit is hit (assuming True means limit hit)
             if len(lim) >= 2 and any(lim):
                 logger.warning(f"Limit hit on axis {i}: {lim}, velocity: {vel}")
         
         # Always return False to prevent blocking movements
         return False
 
-    def reload_config(self) -> None:
-        """Reload configuration from file."""
-        try:
-            # Reload the config manager's config from disk
-            self.config_manager.config = self.config_manager.load_config()
+    def get_feedback(self) -> Dict[str, Any]:
+        """Get robot feedback with improved error handling."""
+        with self._servo_lock:
+            if not self.servos:
+                logger.warning("Servos not enabled.")
+                return {"q": [], "dq": [], "error": [], "limits": []}
+        
+        q = []
+        dq = []
+        limits = []
+        
+        with self._servo_lock:
+            # Read joint positions
+            motor_angles = []
+            motor_encoders = []
+            for i, servo in enumerate(self.servos):
+                encoder_value = self._read_encoder_with_fallback(i, servo)
+                motor_encoders.append(encoder_value)
+                angle_rad = self.encoder_to_angle(encoder_value, i)
+                motor_angles.append(angle_rad)
             
-            # Reload motor configurations
-            motor_configs = self.config_manager.get('can_driver.motors', [])
-            self.motor_configs = {}
-            for mc in motor_configs:
-                self.motor_configs[mc['id']] = {
-                    'speed_rpm': mc.get('speed_rpm', self.default_speed),
-                    'acceleration': mc.get('acceleration', self.default_acc),
-                    'homing_offset': mc.get('homing_offset', 0),
-                    'home_direction': mc.get('home_direction', 'CCW'),
-                    'home_speed': mc.get('home_speed', 50),
-                    'offset_speed': mc.get('offset_speed', 100),
-                    'endstop_level': mc.get('endstop_level', 'Low')
-                }
+            # Convert motor angles to joint angles for coupled mode
+            coupled_mode = self.config_manager.get('joints.coupled_mode', False)
+            if coupled_mode and len(motor_angles) >= 6:
+                # For coupled joints 4 and 5
+                motor4_angle = motor_angles[4]
+                motor5_angle = motor_angles[5]
+                
+                # Inverse kinematics for coupled joints
+                joint4 = (motor4_angle - motor5_angle) / 2
+                joint5 = (motor4_angle + motor5_angle) / 2
+                
+                q = motor_angles[:4] + [joint4, joint5]
+            else:
+                q = motor_angles
             
-            # Reload other settings
-            self.gear_ratios = self.config_manager.get('can_driver.gear_ratios', [1.0] * 6)
+            # Read joint velocities with error handling
+            for i, servo in enumerate(self.servos):
+                try:
+                    velocity = servo.read_motor_speed()
+                    # Convert RPM to rad/s
+                    dq.append((velocity * 2 * math.pi) / 60.0)
+                except Exception as e:
+                    logger.debug(f"Error reading velocity for servo {i}: {e}")
+                    dq.append(0.0)
+            
+            # Read limit switch status
+            for i, servo in enumerate(self.servos):
+                try:
+                    io_status = servo.read_io_port_status()
+                    # Assuming bit 0 and 1 are limit switches
+                    low_limit = not bool(io_status & 1) if io_status is not None else False
+                    high_limit = not bool(io_status & 2) if io_status is not None else False
+                    limits.append([low_limit, high_limit])
+                except Exception as e:
+                    logger.debug(f"Error reading limits for servo {i}: {e}")
+                    limits.append([False, False])
+            
+            # Read shaft angle error for each servo
+            error = []
+            for i, servo in enumerate(self.servos):
+                try:
+                    angle_error = servo.read_shaft_angle_error()
+                    error.append(angle_error)
+                except Exception as e:
+                    logger.debug(f"Error reading angle error for servo {i}: {e}")
+                    error.append(0)
+            
+            # Read running status
+            running = []
+            for i, servo in enumerate(self.servos):
+                try:
+                    is_running = servo.is_motor_running()
+                    running.append(is_running)
+                except Exception as e:
+                    logger.debug(f"Error checking if motor {i} is running: {e}")
+                    running.append(False)
 
-            config_ids = list(self.motor_configs.keys())
-            highest_config_id = max(config_ids) if config_ids else -1
-            new_motor_count = max(len(self.gear_ratios), highest_config_id + 1, 6)
+        # Update current limits for movement validation
+        self.current_limits = limits
+        
+        # Check and enforce coupled limit constraints
+        self.check_and_enforce_coupled_limits()
 
-            if new_motor_count != self.motor_count:
-                self.motor_count = new_motor_count
-                while len(self.motors) < self.motor_count:
-                    motor_id = len(self.motors)
-                    config = dict(self.get_motor_config(motor_id))
-                    gear_ratio = self.gear_ratios[motor_id] if motor_id < len(self.gear_ratios) else 1.0
-                    self.motors.append(
-                        Motor(
-                            motor_id=motor_id,
-                            can_id=motor_id + 1,
-                            config=config,
-                            encoder_resolution=self.encoder_resolution,
-                            gear_ratio=gear_ratio,
-                        )
-                    )
-                if len(self.motors) > self.motor_count:
-                    self.motors = self.motors[:self.motor_count]
-
-                self.previous_limits = [[False, False] for _ in range(self.motor_count)]
-                self.current_limits = [[False, False] for _ in range(self.motor_count)]
-                self.velocity_direction = [None] * self.motor_count
-                self.velocity_active = [False] * self.motor_count
-
-            for motor in self.motors:
-                gear_ratio = self.gear_ratios[motor.motor_id] if motor.motor_id < len(self.gear_ratios) else motor.gear_ratio
-                config = self.get_motor_config(motor.motor_id)
-                motor.update_config(config, gear_ratio=gear_ratio, encoder_resolution=self.encoder_resolution)
-
-            logger.info("Configuration reloaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to reload configuration: {e}")
-            raise
+        return {"q": q, "dq": dq, "error": error, "limits": limits, "motor_encoders": motor_encoders, "running": running}
     def __del__(self):
         """Cleanup on destruction."""
         try:

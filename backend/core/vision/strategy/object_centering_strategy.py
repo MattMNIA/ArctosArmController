@@ -1,0 +1,845 @@
+"""Strategy for keeping a detected object centered in the camera frame."""
+
+from __future__ import annotations
+
+import logging
+import math
+import threading
+import time
+from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Deque, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
+
+try:
+    import cv2
+except ImportError:  # pragma: no cover - optional dependency for visualization
+    cv2 = None  # type: ignore[assignment]
+
+from ..calibration.object_centering import (
+    AxisCalibration,
+    DEFAULT_CALIBRATION_PATH,
+    ObjectCenteringCalibration,
+    load_calibration,
+)
+from ..detectors.object.object_detector import (
+    DetectionResult,
+    ObjectDetection,
+    ObjectDetector,
+)
+from ...motion_service import JointCommand, MotionService
+
+logger = logging.getLogger(__name__)
+_DEG_TO_RAD = math.pi / 180.0
+
+
+class ArmDriverProtocol(Protocol):
+    """Subset of the driver interface required by the centering strategy."""
+
+    def get_feedback(self) -> Dict[str, Any]:  # pragma: no cover - Protocol definition
+        ...
+
+    def send_joint_targets(self, q: List[float], t_s: Optional[float] = None) -> None:  # pragma: no cover - Protocol definition
+        ...
+
+
+@dataclass
+class AxisError:
+    """Stores the pixel error and resulting joint delta for one axis."""
+
+    error_pixels: float
+    delta_radians: float
+    joint_index: int
+
+    def as_dict(self) -> Dict[str, float]:
+        return {
+            "error_pixels": float(self.error_pixels),
+            "delta_radians": float(self.delta_radians),
+            "joint_index": float(self.joint_index),
+        }
+
+
+class TargetSelector:
+    """Chooses which detection to track based on label preferences and confidence."""
+
+    def __init__(
+        self,
+        preferred_labels: Optional[Sequence[str]] = None,
+        *,
+        min_confidence: float = 0.3,
+        lock_on: bool = True,
+    ) -> None:
+        self._preferred_labels = {label.lower() for label in preferred_labels or []}
+        self._min_confidence = max(0.0, float(min_confidence))
+        self._lock_on = lock_on
+        self._active_label: Optional[str] = None
+
+    def set_preferred_labels(self, labels: Optional[Sequence[str]]) -> None:
+        self._preferred_labels = {label.lower() for label in labels or []}
+        if not self._preferred_labels:
+            self._active_label = None
+
+    def set_single_label(self, label: Optional[str]) -> None:
+        if label is None:
+            self._preferred_labels = set()
+            self._active_label = None
+            return
+        normalized = label.lower()
+        self._preferred_labels = {normalized}
+        self._active_label = None
+
+    def clear_lock(self) -> None:
+        self._active_label = None
+
+    def select(self, detections: Sequence[ObjectDetection]) -> Optional[ObjectDetection]:
+        candidates = [d for d in detections if d.confidence >= self._min_confidence]
+        if not candidates:
+            return None
+
+        if self._active_label:
+            locked = self._best_label_match(candidates, {self._active_label})
+            if locked:
+                return locked
+            self._active_label = None
+
+        if self._preferred_labels:
+            preferred = self._best_label_match(candidates, self._preferred_labels)
+            if preferred:
+                if self._lock_on:
+                    self._active_label = preferred.label.lower()
+                return preferred
+            return None
+
+        fallback = max(candidates, key=self._score_detection)
+        if self._lock_on:
+            self._active_label = fallback.label.lower()
+        return fallback
+
+    @staticmethod
+    def _score_detection(detection: ObjectDetection) -> Tuple[float, float]:
+        bbox = detection.bbox
+        area = bbox.width * bbox.height
+        return (detection.confidence, area)
+
+    @staticmethod
+    def _best_label_match(
+        detections: Sequence[ObjectDetection],
+        labels: Iterable[str],
+    ) -> Optional[ObjectDetection]:
+        label_set = {label.lower() for label in labels}
+        labeled = [d for d in detections if d.label.lower() in label_set]
+        if not labeled:
+            return None
+        return max(labeled, key=lambda d: (d.confidence, d.bbox.width * d.bbox.height))
+
+
+class ObjectCenteringStrategy:
+    """Continuously adjusts arm joints to keep a selected object centered."""
+
+    def __init__(
+        self,
+        detector: ObjectDetector,
+        *,
+        motion_service: Optional[MotionService] = None,
+        driver: Optional[ArmDriverProtocol] = None,
+        calibration: Optional[ObjectCenteringCalibration] = None,
+        calibration_path: Optional[Path | str] = None,
+        preferred_labels: Optional[Sequence[str]] = None,
+        min_confidence: float = 0.3,
+        command_interval: float = 0.3,
+        move_duration: float = 0.4,
+        use_motion_queue: bool = False,
+        display_feed: bool = False,
+        display_window_name: Optional[str] = None,
+        invert_horizontal: bool = False,
+        invert_vertical: bool = False,
+        satisfied_error_pixels: float = 64.0,
+        satisfied_duration: float = 4.0,
+        latency_compensation_s: float = 0.05,
+        latency_slowdown: float = 2.5,
+        prediction_limit_px: float = 180.0,
+        error_filter_alpha: float = 0.4,
+        swing_damping_factor: float = 0.6,
+        swing_window: int = 6,
+        swing_tolerance_px: float = 6.0,
+        min_command_delay_s: float = 3.0,
+        require_new_frame: bool = True,
+        frame_wait_tolerance: float = 0.02,
+    ) -> None:
+        if calibration is None:
+            candidate_path = Path(calibration_path) if calibration_path is not None else DEFAULT_CALIBRATION_PATH
+            try:
+                calibration = load_calibration(candidate_path)
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    "ObjectCenteringStrategy requires calibration data; run the calibration script first."
+                ) from exc
+        calibration.ensure_complete()
+
+        if motion_service is None and driver is None:
+            raise ValueError("Either a MotionService or a driver instance must be provided")
+        if use_motion_queue and motion_service is None:
+            raise ValueError("use_motion_queue=True requires a MotionService instance")
+
+        self._detector = detector
+        self._motion_service = motion_service
+        self._driver = driver or (motion_service.driver if motion_service else None)
+        self._calibration = calibration
+        self._selector = TargetSelector(preferred_labels, min_confidence=min_confidence)
+        self._command_interval = max(0.05, float(command_interval))
+        self._move_duration = max(0.1, float(move_duration))
+        self._use_motion_queue = use_motion_queue
+        self._invert_horizontal = bool(invert_horizontal)
+        self._invert_vertical = bool(invert_vertical)
+        self._satisfied_error_pixels = max(0.0, float(satisfied_error_pixels))
+        self._satisfied_duration = max(0.0, float(satisfied_duration))
+        self._satisfied_since: Optional[float] = None
+        self._active_target: Optional[ObjectDetection] = None
+        self._latency_compensation_s = max(0.0, float(latency_compensation_s))
+        self._latency_slowdown = max(0.0, float(latency_slowdown))
+        self._prediction_limit_px = max(0.0, float(prediction_limit_px))
+        self._prev_error_timestamp: Optional[float] = None
+        self._prev_error_x: Optional[float] = None
+        self._prev_error_y: Optional[float] = None
+        self._last_latency = 0.0
+        self._last_latency_scale = 1.0
+        self._error_filter_alpha = min(max(float(error_filter_alpha), 0.0), 1.0)
+        self._filtered_error_x: Optional[float] = None
+        self._filtered_error_y: Optional[float] = None
+        self._swing_damping_factor = max(0.0, float(swing_damping_factor))
+        self._swing_window = max(2, int(swing_window))
+        self._swing_tolerance_px = max(0.0, float(swing_tolerance_px))
+        self._swing_history_x: Deque[int] = deque(maxlen=self._swing_window)
+        self._swing_history_y: Deque[int] = deque(maxlen=self._swing_window)
+        self._current_swing_scale = 1.0
+        self._last_total_scale = 1.0
+        self._min_command_delay = max(0.0, float(min_command_delay_s))
+        self._next_command_time = 0.0
+        self._require_new_frame = bool(require_new_frame)
+        self._frame_wait_tolerance = max(0.0, float(frame_wait_tolerance))
+        self._await_new_frame = False
+        self._last_command_frame_ts: Optional[float] = None
+
+        if display_feed and cv2 is None:
+            logger.warning("display_feed requested but OpenCV is not available; disabling preview")
+            display_feed = False
+        self._display_feed = bool(display_feed)
+        self._display_window_name = display_window_name or "Object Centering"
+        self._display_initialized = False
+
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._worker: Optional[threading.Thread] = None
+        self._last_command_time = 0.0
+        self._last_status: Dict[str, Any] = {}
+
+    # ------------------------------------------------------------------
+    # Public API
+    def start(self, *, poll_interval: float = 0.05) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self._stop_event.clear()
+        self._worker = threading.Thread(
+            target=self._run_loop,
+            args=(max(0.0, float(poll_interval)),),
+            name="object-centering",
+            daemon=True,
+        )
+        self._worker.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._worker:
+            self._worker.join(timeout=1.0)
+        self._worker = None
+        self._close_display_window()
+
+    def step(self) -> Optional[Dict[str, Any]]:
+        result = self._detector.detect(return_frame=True)
+        if result is None:
+            self._update_satisfaction_marker(None, None, None)
+            self._record_status({"state": "no_frame"})
+            return None
+
+        if result.frame is None or not result.detections:
+            self._update_satisfaction_marker(None, None, None)
+            self._maybe_display_frame(result, None, None, None, [])
+            self._record_status({"state": "no_detections", "timestamp": result.timestamp})
+            self._clear_active_target()
+            return None
+
+        detection = self._selector.select(result.detections)
+        if detection is None:
+            self._update_satisfaction_marker(None, None, None)
+            self._maybe_display_frame(result, None, None, None, [])
+            self._record_status(
+                {
+                    "state": "no_target",
+                    "timestamp": result.timestamp,
+                    "detections": [d.to_dict() for d in result.detections],
+                }
+            )
+            self._clear_active_target()
+            return None
+
+        self._active_target = detection
+
+        frame = result.frame
+        height, width = frame.shape[:2]
+        bbox_center = detection.bbox.center()
+        error_x = bbox_center[0] - (width / 2.0)
+        error_y = bbox_center[1] - (height / 2.0)
+
+        scale_x = self._resolution_scale(self._calibration.reference_width, width)
+        scale_y = self._resolution_scale(self._calibration.reference_height, height)
+
+        wall_now = time.time()
+        latency_seconds = max(0.0, wall_now - float(result.timestamp))
+
+        monotonic_now = time.monotonic()
+        if self._min_command_delay > 0.0 and monotonic_now < self._next_command_time:
+            remaining = self._next_command_time - monotonic_now
+            satisfied_cooldown = self._update_satisfaction_marker(result.timestamp, error_x, error_y)
+            self._last_latency = float(latency_seconds)
+            self._maybe_display_frame(result, detection, error_x, error_y, [], None, None)
+            payload = {
+                "timestamp": result.timestamp,
+                "target": detection.to_dict(),
+                "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+                "deltas": {},
+                "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
+                "satisfied": bool(satisfied_cooldown),
+                "awaiting_frame": bool(self._await_new_frame),
+                "cooldown_seconds": float(max(0.0, remaining)),
+                "latency_seconds": float(latency_seconds),
+                "latency_scale": float(self._last_latency_scale),
+                "swing_scale": float(self._current_swing_scale),
+                "total_scale": float(self._last_total_scale),
+            }
+            self._record_status({"state": "cooldown", **payload})
+            return payload
+
+        if self._require_new_frame and self._await_new_frame:
+            last_frame_ts = self._last_command_frame_ts
+            if last_frame_ts is not None and result.timestamp <= last_frame_ts + self._frame_wait_tolerance:
+                satisfied_wait = self._update_satisfaction_marker(result.timestamp, error_x, error_y)
+                self._last_latency = float(latency_seconds)
+                self._maybe_display_frame(result, detection, error_x, error_y, [], None, None)
+                payload = {
+                    "timestamp": result.timestamp,
+                    "target": detection.to_dict(),
+                    "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+                    "deltas": {},
+                    "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
+                    "satisfied": bool(satisfied_wait),
+                    "awaiting_frame": True,
+                    "latency_seconds": float(latency_seconds),
+                    "latency_scale": float(self._last_latency_scale),
+                    "swing_scale": float(self._current_swing_scale),
+                    "total_scale": float(self._last_total_scale),
+                }
+                self._record_status({"state": "awaiting_frame", **payload})
+                return payload
+            self._await_new_frame = False
+            self._last_command_frame_ts = None
+
+        lead_time = latency_seconds + self._latency_compensation_s
+        predicted_x, predicted_y = self._anticipate_error(error_x, error_y, float(result.timestamp), lead_time)
+
+        command_x = self._apply_error_filter(predicted_x, self._filtered_error_x)
+        command_y = self._apply_error_filter(predicted_y, self._filtered_error_y)
+        self._filtered_error_x = command_x
+        self._filtered_error_y = command_y
+        swing_scale = self._update_swing_damping(command_x, command_y)
+        self._current_swing_scale = swing_scale
+        latency_scale_preview = self._compute_latency_scale(latency_seconds)
+        total_scale_preview = max(0.1, min(1.0, latency_scale_preview * swing_scale))
+        self._last_latency = float(latency_seconds)
+        self._last_latency_scale = float(latency_scale_preview)
+        self._last_total_scale = float(total_scale_preview)
+
+        axis_errors = self._compute_axis_errors(command_x, command_y, width, height)
+        satisfied = self._update_satisfaction_marker(result.timestamp, error_x, error_y)
+        display_axis_errors = [] if satisfied else axis_errors
+        predicted_tuple: Optional[Tuple[float, float]] = (predicted_x, predicted_y)
+        command_tuple: Optional[Tuple[float, float]] = (command_x, command_y)
+        self._maybe_display_frame(
+            result,
+            detection,
+            error_x,
+            error_y,
+            display_axis_errors,
+            predicted_tuple,
+            command_tuple,
+        )
+
+        if satisfied:
+            effective_scale = float(self._current_swing_scale * self._last_latency_scale)
+            payload = {
+                "timestamp": result.timestamp,
+                "target": detection.to_dict(),
+                "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+                "predicted_errors": {
+                    "x_pixels": float(predicted_x),
+                    "y_pixels": float(predicted_y),
+                },
+                "command_errors": {
+                    "x_pixels": float(command_x),
+                    "y_pixels": float(command_y),
+                },
+                "deltas": {},
+                "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
+                "satisfied": True,
+                "latency_seconds": float(latency_seconds),
+                "latency_scale": float(self._last_latency_scale),
+                "swing_scale": float(self._current_swing_scale),
+                "total_scale": effective_scale,
+            }
+            self._record_status({"state": "hold", **payload})
+            return payload
+
+        if not axis_errors:
+            effective_scale = float(self._current_swing_scale * self._last_latency_scale)
+            payload = {
+                "timestamp": result.timestamp,
+                "target": detection.to_dict(),
+                "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+                "deltas": {},
+                "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
+                "satisfied": False,
+                "predicted_errors": {
+                    "x_pixels": float(predicted_x),
+                    "y_pixels": float(predicted_y),
+                },
+                "command_errors": {
+                    "x_pixels": float(command_x),
+                    "y_pixels": float(command_y),
+                },
+                "latency_seconds": float(latency_seconds),
+                "latency_scale": float(self._last_latency_scale),
+                "swing_scale": float(self._current_swing_scale),
+                "total_scale": effective_scale,
+            }
+            self._record_status({"state": "within_deadband", **payload})
+            return payload
+
+        deltas = {axis_error.joint_index: axis_error.delta_radians for axis_error in axis_errors}
+        if not self._apply_joint_deltas(deltas, latency_seconds, result.timestamp):
+            return None
+
+        payload = {
+            "timestamp": result.timestamp,
+            "target": detection.to_dict(),
+            "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+            "deltas": {idx: float(delta) for idx, delta in deltas.items()},
+            "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
+            "satisfied": False,
+            "predicted_errors": {
+                "x_pixels": float(predicted_x),
+                "y_pixels": float(predicted_y),
+            },
+            "command_errors": {
+                "x_pixels": float(command_x),
+                "y_pixels": float(command_y),
+            },
+            "latency_seconds": float(latency_seconds),
+            "latency_scale": float(self._last_latency_scale),
+            "swing_scale": float(self._current_swing_scale),
+            "total_scale": float(self._last_total_scale),
+        }
+        self._record_status({"state": "command_sent", **payload})
+        return payload
+
+    def set_target_label(self, label: Optional[str]) -> None:
+        self._selector.set_single_label(label)
+
+    def set_target_labels(self, labels: Optional[Sequence[str]]) -> None:
+        self._selector.set_preferred_labels(labels)
+
+    def clear_lock(self) -> None:
+        self._selector.clear_lock()
+
+    def reload_calibration(self, path: Optional[Path | str] = None) -> None:
+        candidate = Path(path) if path is not None else DEFAULT_CALIBRATION_PATH
+        calibration = load_calibration(candidate)
+        calibration.ensure_complete()
+        with self._lock:
+            self._calibration = calibration
+
+    def get_status(self) -> Dict[str, Any]:
+        with self._lock:
+            return dict(self._last_status)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    def _run_loop(self, poll_interval: float) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self.step()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("ObjectCenteringStrategy loop error: %s", exc)
+            if poll_interval <= 0.0:
+                continue
+            self._stop_event.wait(poll_interval)
+
+    def _compute_axis_errors(
+        self,
+        error_x: float,
+        error_y: float,
+        frame_width: int,
+        frame_height: int,
+    ) -> List[AxisError]:
+        axis_errors: List[AxisError] = []
+        horizontal = self._calibration.horizontal
+        vertical = self._calibration.vertical
+        if horizontal:
+            effective_error = -error_x if self._invert_horizontal else error_x
+            scaled_error = self._scale_error_for_resolution(
+                effective_error,
+                reference_dimension=self._calibration.reference_width,
+                current_dimension=frame_width,
+            )
+            delta = self._pixel_error_to_delta(scaled_error, horizontal)
+            if delta is not None:
+                axis_errors.append(AxisError(error_x, delta, horizontal.joint_index))
+        if vertical:
+            effective_error = -error_y if self._invert_vertical else error_y
+            scaled_error = self._scale_error_for_resolution(
+                effective_error,
+                reference_dimension=self._calibration.reference_height,
+                current_dimension=frame_height,
+            )
+            delta = self._pixel_error_to_delta(scaled_error, vertical)
+            if delta is not None:
+                axis_errors.append(AxisError(error_y, delta, vertical.joint_index))
+        return axis_errors
+
+    def _clear_active_target(self) -> None:
+        self._active_target = None
+        self._satisfied_since = None
+        self._prev_error_timestamp = None
+        self._prev_error_x = None
+        self._prev_error_y = None
+        self._filtered_error_x = None
+        self._filtered_error_y = None
+        self._swing_history_x.clear()
+        self._swing_history_y.clear()
+        self._current_swing_scale = 1.0
+        self._last_total_scale = 1.0
+        self._last_latency_scale = 1.0
+        self._await_new_frame = False
+        self._last_command_frame_ts = None
+        self._next_command_time = 0.0
+
+    @staticmethod
+    def _scale_error_for_resolution(
+        error_pixels: float,
+        *,
+        reference_dimension: Optional[int],
+        current_dimension: int,
+    ) -> float:
+        scale = ObjectCenteringStrategy._resolution_scale(reference_dimension, current_dimension)
+        return error_pixels * scale
+
+    @staticmethod
+    def _resolution_scale(reference_dimension: Optional[int], current_dimension: int) -> float:
+        if not reference_dimension or reference_dimension <= 0:
+            return 1.0
+        if current_dimension <= 0:
+            return 1.0
+        return reference_dimension / float(current_dimension)
+
+    @staticmethod
+    def _pixel_error_to_delta(error_pixels: float, calibration: AxisCalibration) -> Optional[float]:
+        if abs(error_pixels) <= calibration.deadband_pixels:
+            return None
+        if calibration.pixels_per_degree <= 1e-6:
+            logger.debug("Invalid calibration: pixels_per_degree too small")
+            return None
+        delta_deg = (error_pixels / calibration.pixels_per_degree)
+        if calibration.invert:
+            delta_deg *= -1.0
+        delta_deg *= calibration.gain
+        if calibration.max_delta_deg > 0.0:
+            delta_deg = max(-calibration.max_delta_deg, min(calibration.max_delta_deg, delta_deg))
+        if abs(delta_deg) <= 1e-3:
+            return None
+        return delta_deg * _DEG_TO_RAD
+
+    def _update_satisfaction_marker(
+        self,
+        _timestamp: Optional[float],
+        error_x: Optional[float],
+        error_y: Optional[float],
+    ) -> bool:
+        if self._satisfied_error_pixels <= 0.0 or self._satisfied_duration <= 0.0:
+            self._satisfied_since = None
+            return False
+        if error_x is None or error_y is None:
+            self._satisfied_since = None
+            return False
+
+        within = (
+            abs(error_x) <= self._satisfied_error_pixels
+            and abs(error_y) <= self._satisfied_error_pixels
+        )
+        if not within:
+            self._satisfied_since = None
+            return False
+
+        now_ts = time.monotonic()
+        if self._satisfied_since is None:
+            self._satisfied_since = now_ts
+            return False
+
+        elapsed = now_ts - self._satisfied_since
+        if elapsed >= self._satisfied_duration:
+            return True
+        return False
+
+    def _apply_joint_deltas(
+        self,
+        deltas: Dict[int, float],
+        latency_seconds: float,
+        frame_timestamp: Optional[float],
+    ) -> bool:
+        if not deltas:
+            return False
+        now = time.monotonic()
+        if now - self._last_command_time < self._command_interval:
+            return False
+
+        if self._use_motion_queue and self._motion_service is not None and self._motion_service.is_busy():
+            logger.debug("Skipping centering command; motion service is busy")
+            return False
+
+        latency_scale = self._compute_latency_scale(latency_seconds)
+        swing_scale = self._current_swing_scale
+        total_scale = max(0.1, min(1.0, latency_scale * swing_scale))
+        self._last_latency = float(latency_seconds)
+        self._last_latency_scale = float(latency_scale)
+        self._last_total_scale = float(total_scale)
+
+        driver = self._resolve_driver()
+        feedback = driver.get_feedback()
+        current_q = list(feedback.get("q", []))
+        if not current_q:
+            logger.warning("Driver feedback missing joint positions; skipping centering command")
+            return False
+
+        target_q = current_q[:]
+        for joint_index, delta in deltas.items():
+            if joint_index < 0 or joint_index >= len(target_q):
+                logger.debug("Skipping joint %s outside available range", joint_index)
+                continue
+            target_q[joint_index] = current_q[joint_index] - (delta * total_scale)
+
+        if all(math.isclose(a, b, abs_tol=1e-6) for a, b in zip(target_q, current_q)):
+            return False
+
+        self._dispatch_joint_targets(target_q)
+        self._last_command_time = now
+        if self._require_new_frame:
+            if self._min_command_delay > 0.0:
+                self._next_command_time = time.monotonic() + self._min_command_delay
+            self._await_new_frame = True
+            if frame_timestamp is not None:
+                self._last_command_frame_ts = float(frame_timestamp)
+            else:
+                self._last_command_frame_ts = time.time()
+        else:
+            self._await_new_frame = False
+            self._last_command_frame_ts = None
+            if self._min_command_delay > 0.0:
+                self._next_command_time = time.monotonic() + self._min_command_delay
+        return True
+
+    def _dispatch_joint_targets(self, targets: Sequence[float]) -> None:
+        if self._use_motion_queue and self._motion_service is not None:
+            command = JointCommand(list(targets), duration_s=self._move_duration)
+            self._motion_service.enqueue(command)
+        else:
+            driver = self._resolve_driver()
+            driver.send_joint_targets(list(targets), t_s=self._move_duration)
+
+    def _maybe_display_frame(
+        self,
+        result: DetectionResult,
+        target: Optional[ObjectDetection],
+        error_x: Optional[float],
+        error_y: Optional[float],
+        axis_errors: Sequence[AxisError],
+        predicted_errors: Optional[Tuple[float, float]] = None,
+        command_errors: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        if not self._display_feed or cv2 is None:
+            return
+        frame = result.frame
+        if frame is None:
+            return
+        annotated = frame.copy()
+        detections = list(result.detections)
+        if detections:
+            annotated = self._detector.apply_overlays(annotated, detections)
+        if target is not None:
+            x1, y1, x2, y2 = map(int, target.bbox.as_xyxy())
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        height, width = annotated.shape[:2]
+        center_point = (int(width / 2), int(height / 2))
+        cv2.drawMarker(annotated, center_point, (255, 0, 0), cv2.MARKER_CROSS, 20, 2)
+
+        overlay_lines: List[str] = []
+        if error_x is not None and error_y is not None:
+            overlay_lines.append(f"err_x: {error_x:.1f}px err_y: {error_y:.1f}px")
+        if predicted_errors is not None:
+            overlay_lines.append(
+                f"pred_x: {predicted_errors[0]:.1f}px pred_y: {predicted_errors[1]:.1f}px"
+            )
+        if command_errors is not None:
+            overlay_lines.append(
+                f"cmd_x: {command_errors[0]:.1f}px cmd_y: {command_errors[1]:.1f}px"
+            )
+        overlay_lines.append(
+            f"scale lat:{self._last_latency_scale:.2f} swing:{self._current_swing_scale:.2f} tot:{self._last_total_scale:.2f}"
+        )
+        for axis_error in axis_errors:
+            deg = math.degrees(axis_error.delta_radians)
+            overlay_lines.append(f"joint {axis_error.joint_index}: {deg:.2f} deg")
+        if overlay_lines:
+            y_offset = 20
+            for line in overlay_lines[:4]:
+                cv2.putText(
+                    annotated,
+                    line,
+                    (10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+                y_offset += 18
+
+        if not self._display_initialized:
+            try:
+                cv2.namedWindow(self._display_window_name, cv2.WINDOW_NORMAL)
+            except Exception:
+                logger.exception("Failed to create OpenCV window; disabling preview")
+                self._display_feed = False
+                return
+            self._display_initialized = True
+        cv2.imshow(self._display_window_name, annotated)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (27, ord("q")):
+            logger.info("Vision preview disabled by user input")
+            self._display_feed = False
+            self._close_display_window()
+
+    def _resolve_driver(self) -> ArmDriverProtocol:
+        if not self._use_motion_queue and self._driver is not None:
+            return self._driver
+        if self._motion_service is not None and self._motion_service.driver is not None:
+            return self._motion_service.driver  # type: ignore[return-value]
+        if self._driver is not None:
+            return self._driver
+        raise RuntimeError("No driver available to send centering commands")
+
+    def _record_status(self, payload: Dict[str, Any]) -> None:
+        with self._lock:
+            self._last_status = dict(payload)
+
+    def _close_display_window(self) -> None:
+        if not self._display_initialized or cv2 is None:
+            return
+        try:
+            cv2.destroyWindow(self._display_window_name)
+        except Exception:
+            logger.debug("Failed to destroy OpenCV window", exc_info=True)
+        finally:
+            self._display_initialized = False
+
+    def is_satisfied(self) -> bool:
+        if self._satisfied_since is None:
+            return False
+        return (time.monotonic() - self._satisfied_since) >= self._satisfied_duration
+
+    def _anticipate_error(
+        self,
+        error_x: float,
+        error_y: float,
+        timestamp: float,
+        lead_time: float,
+    ) -> Tuple[float, float]:
+        prev_ts = self._prev_error_timestamp
+        prev_x = self._prev_error_x
+        prev_y = self._prev_error_y
+
+        predicted_x = error_x
+        predicted_y = error_y
+        if (
+            prev_ts is not None
+            and prev_x is not None
+            and prev_y is not None
+            and timestamp > prev_ts
+        ):
+            dt = max(1e-3, timestamp - prev_ts)
+            rate_x = (error_x - prev_x) / dt
+            rate_y = (error_y - prev_y) / dt
+            horizon = max(0.0, min(lead_time, 0.6))
+            projected_x = error_x + rate_x * horizon
+            projected_y = error_y + rate_y * horizon
+            if self._prediction_limit_px > 0.0:
+                max_shift = self._prediction_limit_px
+                shift_x = max(-max_shift, min(max_shift, projected_x - error_x))
+                shift_y = max(-max_shift, min(max_shift, projected_y - error_y))
+                predicted_x = error_x + shift_x
+                predicted_y = error_y + shift_y
+            else:
+                predicted_x = projected_x
+                predicted_y = projected_y
+
+        self._prev_error_timestamp = timestamp
+        self._prev_error_x = error_x
+        self._prev_error_y = error_y
+        return predicted_x, predicted_y
+
+    def _apply_error_filter(self, value: float, previous: Optional[float]) -> float:
+        alpha = self._error_filter_alpha
+        if alpha <= 0.0 or previous is None:
+            return value
+        if alpha >= 1.0:
+            return value
+        return (alpha * value) + ((1.0 - alpha) * previous)
+
+    def _update_swing_damping(self, error_x: float, error_y: float) -> float:
+        if self._swing_damping_factor <= 0.0:
+            return 1.0
+        scale_x = self._swing_scale_for_axis(self._swing_history_x, error_x)
+        scale_y = self._swing_scale_for_axis(self._swing_history_y, error_y)
+        return min(scale_x, scale_y)
+
+    def _swing_scale_for_axis(self, history: Deque[int], value: float) -> float:
+        threshold = self._swing_tolerance_px
+        sign = 0
+        if value > threshold:
+            sign = 1
+        elif value < -threshold:
+            sign = -1
+        history.append(sign)
+        non_zero = [s for s in history if s != 0]
+        if len(non_zero) < 2:
+            return 1.0
+        changes = sum(1 for a, b in zip(non_zero, non_zero[1:]) if a != b)
+        if changes == 0:
+            return 1.0
+        scale = 1.0 / (1.0 + changes * self._swing_damping_factor)
+        return max(0.2, min(1.0, scale))
+
+    def _compute_latency_scale(self, latency_seconds: float) -> float:
+        if self._latency_slowdown <= 0.0:
+            return 1.0
+        scale = 1.0 / (1.0 + (max(0.0, latency_seconds) * self._latency_slowdown))
+        return max(0.1, min(1.0, scale))
+
+
+__all__ = ["ObjectCenteringStrategy", "TargetSelector", "ArmDriverProtocol"]

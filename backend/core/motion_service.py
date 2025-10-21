@@ -79,12 +79,13 @@ class ActiveCommandContext:
     command: Command
     start_time: float
     min_duration: float
-    timeout: float
     target_q: Optional[List[float]] = None
     target_gripper: Optional[float] = None
     tolerance: float = 0.02
     velocity_tolerance: float = 0.05
     complete_on_return: bool = False
+    last_progress_time: float = 0.0
+    last_position_error: Optional[float] = None
 
 class MotionService:
     """
@@ -113,8 +114,9 @@ class MotionService:
         self._active_context: Optional[ActiveCommandContext] = None
         self._position_tolerance = 0.02  # radians (~1.1 degrees)
         self._velocity_tolerance = 0.05  # rad/s
-        self._min_joint_timeout = 3.0
-        self._joint_timeout_scale = 2.5
+        self._minimum_motion_duration = 0.5  # seconds, fallback estimate when feedback is limited
+        self._stall_timeout = 2.5  # seconds without progress before flagging a stall
+        self._stall_velocity_epsilon = 0.01  # rad/s threshold to treat motor as stopped
 
     @property
     def current_state(self):
@@ -217,6 +219,15 @@ class MotionService:
                 break
         logger.info(f"Command queue cleared. Removed {cleared_count} commands due to limit hit.")
 
+    def is_busy(self) -> bool:
+        """Return True if a command is executing or waiting in the queue."""
+        with self._command_lock:
+            if self._current_command is not None:
+                return True
+        if not self.command_queue.empty():
+            return True
+        return self.paused
+
     def _cancel_pending_gripper_commands(self):
         """Remove any pending gripper commands from the queue."""
         # Create a new queue with non-gripper commands
@@ -315,18 +326,14 @@ class MotionService:
             base_time = cmd.duration_s if cmd.duration_s is not None else estimated_time
             base_time = max(base_time, 0.1)
             min_duration = max(0.1, min(base_time * 0.5, base_time))
-            timeout = (base_time * self._joint_timeout_scale) + 1.0
-            timeout = max(timeout, self._min_joint_timeout, min_duration + 1.0)
-            return ActiveCommandContext(
+            context = ActiveCommandContext(
                 command=cmd,
                 start_time=start_time,
                 min_duration=min_duration,
-                timeout=timeout,
-                target_q=target_q
+                target_q=target_q,
             )
-        if isinstance(cmd, GripperCommand):
+        elif isinstance(cmd, GripperCommand):
             min_duration = max(cmd.delay, 0.1)
-            timeout = min_duration + 1.0
             if cmd.action == 'set' and cmd.position is not None:
                 target_gripper = cmd.position
             elif cmd.action == 'open':
@@ -335,27 +342,28 @@ class MotionService:
                 target_gripper = 0.0
             else:
                 target_gripper = None
-            return ActiveCommandContext(
+            context = ActiveCommandContext(
                 command=cmd,
                 start_time=start_time,
                 min_duration=min_duration,
-                timeout=timeout,
-                target_gripper=target_gripper
+                target_gripper=target_gripper,
             )
-        if isinstance(cmd, HomeCommand):
-            return ActiveCommandContext(
+        elif isinstance(cmd, HomeCommand):
+            context = ActiveCommandContext(
                 command=cmd,
                 start_time=start_time,
                 min_duration=0.0,
-                timeout=90.0,
-                complete_on_return=True
+                complete_on_return=True,
             )
-        return ActiveCommandContext(
-            command=cmd,
-            start_time=start_time,
-            min_duration=0.1,
-            timeout=self._min_joint_timeout
-        )
+        else:
+            context = ActiveCommandContext(
+                command=cmd,
+                start_time=start_time,
+                min_duration=0.1,
+            )
+
+        context.last_progress_time = start_time
+        return context
 
     def _complete_current_command(self, new_state: str = "IDLE") -> None:
         with self._command_lock:
@@ -386,15 +394,10 @@ class MotionService:
         if context is None or context.complete_on_return:
             return
 
-        elapsed = time.time() - context.start_time
-
-        if elapsed > context.timeout:
-            self._abort_current_command(
-                f"Command timeout after {elapsed:.2f}s (limit {context.timeout:.2f}s)",
-                new_state="TIMEOUT"
-            )
-            self.paused = True
-            return
+        now = time.time()
+        elapsed = now - context.start_time
+        running_flags = feedback.get("running")
+        running_list = list(running_flags) if isinstance(running_flags, (list, tuple)) else None
 
         if isinstance(context.command, JointCommand):
             joint_feedback = feedback.get("q", [])
@@ -411,11 +414,32 @@ class MotionService:
             position_error = max(abs(t - q) for t, q in paired)
             velocity_samples = velocities[:len(paired)] if velocities else []
             max_velocity = max(abs(v) for v in velocity_samples) if velocity_samples else 0.0
+            velocity_threshold = max(context.velocity_tolerance, self._stall_velocity_epsilon)
+
+            # Track progress whenever error reduces or joints are clearly moving
+            if context.last_position_error is None or position_error < context.last_position_error - 1e-4:
+                context.last_progress_time = now
+                context.last_position_error = position_error
+            elif max_velocity > velocity_threshold:
+                context.last_progress_time = now
+                context.last_position_error = position_error
+
+            # Determine if all relevant motors have stopped
+            all_stopped = False
+            if running_list:
+                relevant_flags = []
+                for idx in range(len(paired)):
+                    if idx < len(running_list):
+                        relevant_flags.append(bool(running_list[idx]))
+                if relevant_flags:
+                    all_stopped = not any(relevant_flags)
+            if not all_stopped:
+                all_stopped = max_velocity <= velocity_threshold
 
             if (
                 elapsed >= context.min_duration and
                 position_error <= context.tolerance and
-                max_velocity <= context.velocity_tolerance
+                all_stopped
             ):
                 logger.info(
                     "Joint command complete: max_error=%.4f rad, max_velocity=%.4f rad/s, elapsed=%.2fs",
@@ -424,6 +448,24 @@ class MotionService:
                     elapsed
                 )
                 self._complete_current_command()
+                return
+
+            no_progress = now - context.last_progress_time
+            if (
+                elapsed >= context.min_duration and
+                all_stopped and
+                no_progress >= self._stall_timeout and
+                position_error > context.tolerance
+            ):
+                logger.warning(
+                    "Joint command stalled: error=%.4f rad, elapsed=%.2fs, no_progress=%.2fs",
+                    position_error,
+                    elapsed,
+                    no_progress,
+                )
+                self._abort_current_command("Joint command stalled before reaching target", new_state="STALL")
+                self.paused = True
+                return
         elif isinstance(context.command, GripperCommand):
             if elapsed >= context.min_duration:
                 logger.info(
@@ -513,11 +555,11 @@ class MotionService:
             times.append(delta / speed if speed > 0 else 0.0)
 
         if not times:
-            logger.debug("Unable to infer joint timings from configuration; using minimum timeout")
-            return max(self._min_joint_timeout, 0.5)
+            logger.debug("Unable to infer joint timings from configuration; using minimum duration fallback")
+            return self._minimum_motion_duration
 
         estimated = max(times)
-        return max(estimated, 0.1)
+        return max(estimated, self._minimum_motion_duration)
 
     def _infer_joint_speed_limits(self, num_joints: int) -> List[Optional[float]]:
         can_driver = self._extract_can_driver()

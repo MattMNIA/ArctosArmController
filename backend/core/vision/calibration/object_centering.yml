@@ -1,0 +1,30 @@
+horizontal:
+  joint_index: 0
+  pixels_per_degree: 7.2
+  invert: false
+  gain: 1.0
+  deadband_pixels: 12.0
+  max_delta_deg: 20.0
+vertical:
+  joint_index: 2
+  pixels_per_degree: 6.4
+  invert: true
+  gain: 1.0
+  deadband_pixels: 12.0
+  max_delta_deg: 20.0
+reference_width: 320
+reference_height: 240
+metadata:
+  pixel_delta_horizontal: 36.0
+  delta_deg_horizontal: 5.0
+  pixels_per_degree_horizontal: 7.2
+  invert_horizontal: false
+  reference_width: 320
+  reference_height: 240
+  updated_at: '2025-10-21T02:43:57Z'
+  last_updated_horizontal: '2025-10-21T02:43:57Z'
+  pixel_delta_vertical: -32.0
+  delta_deg_vertical: 5.0
+  pixels_per_degree_vertical: 6.4
+  invert_vertical: true
+  last_updated_vertical: '2025-10-21T02:43:23Z'

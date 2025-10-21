@@ -66,7 +66,7 @@ class CameraManager:
 
         if camera_type == "ip":
             ip_cfg = config.get("ip", {})
-            stream_url = ip_cfg.get("stream_url")
+            stream_url = ip_cfg.get("stream_url", "http://192.168.50.254:81/stream")
             if not stream_url:
                 raise RuntimeError("IP camera configuration is missing 'stream_url'.")
             control_base = ip_cfg.get("control_base_url")
