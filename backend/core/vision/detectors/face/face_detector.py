@@ -33,7 +33,7 @@ class FaceDetector(BaseDetector):
         *,
         cascade_path: Optional[str] = None,
         scale_factor: float = 1.1,
-        min_neighbors: int = 5,  # Reduced from 12 to improve detection reliability
+        min_neighbors: int = 10,  # Reduced from 12 to improve detection reliability
         min_size: tuple[int, int] = (50, 50),  # Increased from (30, 30) to filter small detections
         max_size: Optional[tuple[int, int]] = None,
     ) -> None:

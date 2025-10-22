@@ -253,13 +253,13 @@ class ObjectCenteringStrategy:
             'integral_max': 1.0  # anti-windup
         }
         self._pid_vertical = {
-            'kp': 0.035,  # Increased from 0.02 to make vertical movement faster
-            'ki': 0.001,
-            'kd': 0.005,
+            'kp': 0.12,  # Slightly reduced from 0.15 to reduce overshoot
+            'ki': 0.0003,  # Reduced from 0.001 to prevent integral windup that causes slowdown before centering
+            'kd': 0.015,  # Increased from 0.005 to dampen oscillations when reaching target
             'integral': 0.0,
             'prev_error': 0.0,
             'prev_time': time.time(),
-            'integral_max': 1.0
+            'integral_max': 0.5  # Reduced from 1.0 to limit integral windup
         }
 
         if display_feed and cv2 is None:

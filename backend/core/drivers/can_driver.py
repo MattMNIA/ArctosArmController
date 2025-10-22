@@ -209,18 +209,23 @@ class CanDriver():
             # Direct mapping: joint i -> motor i
             return {i: angle for i, angle in enumerate(joint_angles)}
         
-        # Coupled mode for joints 4 and 5
+        # Coupled mode for joints 1, 4 and 5
         motor_angles = {}
         for i in range(6):
-            if i < 4:
-                # Joints 0-3: direct mapping
+            if i == 1:
+                # Joint 1: coupled to motors 1 and 2 (add coupling - same direction)
+                q1 = joint_angles[1] if 1 < len(joint_angles) else 0
+                motor_angles[1] = q1
+                motor_angles[2] = q1
+            elif i < 4:
+                # Joints 0, 2, 3: direct mapping
                 motor_angles[i] = joint_angles[i]
             else:
                 # Joints 4-5: coupled to motors 4-5
                 q4 = joint_angles[4] if 4 < len(joint_angles) else 0
                 q5 = joint_angles[5] if 5 < len(joint_angles) else 0
                 motor_angles[4] = q4 + q5  # Motor 4
-                motor_angles[5] = -q4 + q5  # Motor 5 (changed from q4 - q5)
+                motor_angles[5] = -q4 + q5  # Motor 5
                 break  # Only need to do this once for both joints
         
         return motor_angles
@@ -268,7 +273,12 @@ class CanDriver():
 
         motor_velocities: Dict[int, float] = {}
         for i in range(6):
-            if i < 4:
+            if i == 1:
+                # Joint 1: coupled to motors 1 and 2 (add coupling - same direction)
+                q1_dot = joint_velocities[1] if 1 < num_joints else 0.0
+                motor_velocities[1] = q1_dot
+                motor_velocities[2] = q1_dot
+            elif i < 4:
                 motor_velocities[i] = joint_velocities[i] if i < num_joints else 0.0
             else:
                 q4_dot = joint_velocities[4] if 4 < num_joints else 0.0
@@ -1208,6 +1218,9 @@ class CanDriver():
                     continue
                 
                 try:
+                    # Get motor-specific config and scale speed
+                    motor_config = self.get_motor_config(motor_id)
+                    
                     # Get motor-specific config and scale speed
                     motor_config = self.get_motor_config(motor_id)
                     max_speed = motor_config['speed_rpm']

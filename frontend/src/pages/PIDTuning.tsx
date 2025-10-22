@@ -123,10 +123,12 @@ export default function PIDTuning() {
 
   useEffect(() => {
     fetchPIDValues();
-    // Poll for updates every 2 seconds
-    const interval = setInterval(fetchPIDValues, 2000);
-    return () => clearInterval(interval);
-  }, [fetchPIDValues]);
+    // Only poll for updates if there are no unsaved changes
+    const interval = hasChanges ? null : setInterval(fetchPIDValues, 2000);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [fetchPIDValues, hasChanges]);
 
   if (error && !pidValues) {
     return (
@@ -178,6 +180,12 @@ export default function PIDTuning() {
           {error && (
             <div className="bg-yellow-900/20 border border-yellow-500 rounded-lg p-4 mb-6">
               <p className="text-yellow-400">{error}</p>
+            </div>
+          )}
+
+          {hasChanges && (
+            <div className="bg-orange-900/20 border border-orange-500 rounded-lg p-4 mb-6">
+              <p className="text-orange-400">You have unsaved changes. Polling paused to prevent slider reset.</p>
             </div>
           )}
 
