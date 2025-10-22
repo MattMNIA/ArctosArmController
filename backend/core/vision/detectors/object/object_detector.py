@@ -171,10 +171,29 @@ class ObjectDetector:
 		copy_frame: bool = False,
 		return_frame: bool = True,
 	) -> Optional[DetectionResult]:
+		# If providing a specific frame, process it synchronously
+		if frame is not None:
+			return self._detect_frame(frame, copy_frame, return_frame)
+		
+		# If background detection is running, return the latest cached result
+		if self._worker_thread and self._worker_thread.is_alive():
+			with self._lock:
+				return self._last_result
+		
+		# Otherwise, perform synchronous detection
+		return self._detect_frame(None, copy_frame, return_frame)
+
+	def _detect_frame(
+		self,
+		frame: Optional[np.ndarray],
+		copy_frame: bool,
+		return_frame: bool,
+	) -> Optional[DetectionResult]:
+		start_time = time.time()
 		model = self._ensure_model_loaded()
 		grabbed_frame = frame if frame is not None else self._grab_frame()
 		if grabbed_frame is None:
-			logger.debug("ObjectDetector.detect: no frame available from camera")
+			logger.debug("ObjectDetector._detect_frame: no frame available from camera")
 			return None
 
 		processed_frame = self._resize_if_needed(grabbed_frame)
@@ -188,6 +207,8 @@ class ObjectDetector:
 		)
 		with self._lock:
 			self._last_result = result
+		detection_time = time.time() - start_time
+		logger.debug("Object detection took %.3f seconds", detection_time)
 		return result
 
 	def stream(
@@ -231,9 +252,17 @@ class ObjectDetector:
 	def _loop(self, poll_interval: float) -> None:
 		while not self._stop_event.is_set():
 			try:
-				self.detect()
+				# Skip detection if we have a recent result to reduce load
+				if self._last_result is not None and (time.time() - self._last_result.timestamp) < poll_interval:
+					if poll_interval > 0.0:
+						self._stop_event.wait(poll_interval)
+					continue
+				result = self._detect_frame(None, copy_frame=False, return_frame=True)
+				if result is not None:
+					with self._lock:
+						self._last_result = result
 			except Exception as exc:  # pragma: no cover - defensive logging.
-				logger.exception("ObjectDetector background loop failed: {exc}")
+				logger.exception("ObjectDetector background loop failed: %s", exc)
 			if poll_interval > 0.0:
 				self._stop_event.wait(poll_interval)
 

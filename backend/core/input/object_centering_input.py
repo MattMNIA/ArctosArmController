@@ -28,7 +28,7 @@ class ObjectCenteringInput(InputController):
         detector_model: Optional[Union[str, Path]] = None,
         preferred_labels: Optional[Sequence[str]] = None,
         calibration_path: Optional[Union[str, Path]] = None,
-        min_confidence: float = 0.3,
+        min_confidence: float = 0.7,
         command_interval: float = 0.3,
         move_duration: float = 0.4,
         use_motion_queue: bool = True,
@@ -53,6 +53,8 @@ class ObjectCenteringInput(InputController):
         if detector_model is not None:
             detector_args.setdefault("model", str(detector_model))
         detector_args.setdefault("confidence_threshold", float(min_confidence))
+        detector_args.setdefault("imgsz", 256)
+        detector_args.setdefault("max_frame_size", (640, 480))
 
         self._detector = ObjectDetector(self._camera_manager, **detector_args)
         self._strategy = ObjectCenteringStrategy(
@@ -70,16 +72,34 @@ class ObjectCenteringInput(InputController):
             invert_horizontal=invert_horizontal,
             invert_vertical=invert_vertical,
         )
+        self._strategy.start(poll_interval=0.05)
+        self._previous_scales: Dict[int, float] = {}
 
     def get_commands(self) -> Dict[Union[int, str], float]:
         return {}
 
     def get_events(self) -> List[Tuple[str, Any, float]]:
-        try:
-            self._strategy.step()
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("Object centering step failed: %s", exc)
-        return []
+        current_scales = self._strategy.get_current_velocity_scales()
+        logger.debug(f"ObjectCenteringInput current_scales: {current_scales}")
+
+        events = []
+        for joint, scale in current_scales.items():
+            prev = self._previous_scales.get(joint, 0)
+            if abs(scale) > 0.005 and abs(prev) <= 0.005:
+                events.append(('press', joint, scale))
+            elif abs(scale) <= 0.005 and abs(prev) > 0.005:
+                events.append(('release', joint, 0))
+            elif abs(scale - prev) > 0.005:
+                events.append(('press', joint, scale))
+
+        for joint in set(self._previous_scales) - set(current_scales):
+            if abs(self._previous_scales[joint]) > 0.005:
+                events.append(('release', joint, 0))
+
+        self._previous_scales = current_scales.copy()
+        logger.debug(f"ObjectCenteringInput events: {events}")
+
+        return events
 
     def set_target_label(self, label: Optional[str]) -> None:
         self._strategy.set_target_label(label)
@@ -92,9 +112,6 @@ class ObjectCenteringInput(InputController):
 
     def close(self) -> None:
         self._strategy.stop()
-        close_method = getattr(self._detector, "close", None)
-        if callable(close_method):
-            close_method()
 
     def __del__(self) -> None:
         try:

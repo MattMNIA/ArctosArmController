@@ -20,12 +20,7 @@ from api.camera_routes import camera_bp
 from core.drivers import PyBulletDriver, CompositeDriver, SimDriver, CanDriver
 from core.motion_service import MotionService
 from core.ik.analytic import AnalyticIKSolver
-from core.teleop_controller import TeleopController
-from core.input.keyboard_input import KeyboardController
-from core.input.xbox_input import XboxController
-from core.input.finger_input import FingerInput as FingerInputController
-from core.input.finger_slider_input import FingerSliderInput
-from core.input.object_centering_input import ObjectCenteringInput
+from core.teleop_manager import TeleopManager, TeleopManagerError
 import utils.logger  # Import to trigger logging setup
 import threading
 import time
@@ -41,18 +36,6 @@ socketio = SocketIO(
     ping_timeout=120,
     ping_interval=25
 )
-
-def run_teleop_loop(teleop_controller):
-    """Run the teleoperation control loop."""
-    try:
-        while True:
-            teleop_controller.teleop_step()
-            time.sleep(0.02)  # ~50Hz control loop
-    except Exception as e:
-        print(f"Teleop loop stopped: {e}")
-        raise
-    finally:
-        teleop_controller.stop_all()
 
 def create_app(drivers_list):
     app = Flask(__name__)
@@ -88,6 +71,7 @@ def create_app(drivers_list):
     motion_service.ws_emit = emit_event
     motion_service.has_active_connections = has_active_connections
     app.config['motion_service'] = motion_service
+    app.config['teleop_manager'] = TeleopManager(motion_service)
 
     # Initialize IK Solver
     try:
@@ -160,52 +144,36 @@ if __name__ == "__main__":
         print("Starting Flask server in background...")
         flask_thread = threading.Thread(target=lambda: socketio.run(app, host="0.0.0.0", port=5000, debug=False), daemon=True)
         flask_thread.start()
-        
-        # Run teleoperation in main thread (required for pygame input handling)
+
+        teleop_manager = app.config['teleop_manager']
+        options = {
+            "centerLabel": args.center_label,
+            "detectorModel": args.yolo_model,
+            "displayFeed": args.show_vision,
+            "invertHorizontal": args.invert_horizontal,
+            "invertVertical": args.invert_vertical,
+        } if teleop_mode == 'object-centering' else {}
+        # Filter out None values to avoid overriding defaults with nulls
+        options = {k: v for k, v in options.items() if v is not None}
+
         print(f"Enabling teleoperation with {teleop_mode} input...")
-        motion_service = app.config['motion_service']
-        comp_driver = motion_service.driver
-
-        if teleop_mode == 'xbox':
-            input_controller = XboxController()
-        elif teleop_mode == 'fingers':
-            input_controller = FingerInputController()
-        elif teleop_mode == 'finger-sliders':
-            input_controller = FingerSliderInput(gesture_update_interval=0.1)  # ~33 Hz
-        elif teleop_mode == 'object-centering':
-            labels = [args.center_label] if args.center_label else None
-            input_controller = ObjectCenteringInput(
-                motion_service=motion_service,
-                driver=comp_driver,
-                detector_model=args.yolo_model,
-                preferred_labels=labels,
-                use_motion_queue=True,
-                display_feed=args.show_vision,
-                display_window_name="Object Centering",
-                invert_horizontal=args.invert_horizontal,
-                invert_vertical=args.invert_vertical,
-            )
-        else:
-            input_controller = KeyboardController()
-
-        teleop_controller = TeleopController(input_controller, comp_driver, motion_service)
-        
-        print("Teleoperation enabled. Use your input device to control the arm. Press Ctrl+C to exit.")
         try:
-            run_teleop_loop(teleop_controller)
+            teleop_manager.start_mode(teleop_mode, options=options)
+        except TeleopManagerError as exc:
+            print(f"Failed to start teleoperation: {exc}")
+            raise SystemExit(1) from exc
+
+        print("Teleoperation enabled. Press Ctrl+C to exit.")
+        try:
+            while True:
+                time.sleep(1.0)
         except KeyboardInterrupt:
             print("Shutting down...")
         finally:
             try:
-                teleop_controller.stop_all()
+                teleop_manager.stop()
             except Exception:
                 pass
-            close_method = getattr(input_controller, "close", None)
-            if callable(close_method):
-                try:
-                    close_method()
-                except Exception:
-                    pass
             try:
                 app.config['motion_service'].stop()
             except Exception:

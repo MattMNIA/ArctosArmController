@@ -42,19 +42,25 @@ class ArmDriverProtocol(Protocol):
     def send_joint_targets(self, q: List[float], t_s: Optional[float] = None) -> None:  # pragma: no cover - Protocol definition
         ...
 
+    def start_joint_velocity(self, joint_index: int, scale: float) -> None:  # pragma: no cover - Protocol definition
+        ...
+
+    def stop_joint_velocity(self, joint_index: int) -> None:  # pragma: no cover - Protocol definition
+        ...
+
 
 @dataclass
 class AxisError:
-    """Stores the pixel error and resulting joint delta for one axis."""
+    """Stores the pixel error and resulting velocity scale for one axis."""
 
     error_pixels: float
-    delta_radians: float
+    velocity_scale: float
     joint_index: int
 
     def as_dict(self) -> Dict[str, float]:
         return {
             "error_pixels": float(self.error_pixels),
-            "delta_radians": float(self.delta_radians),
+            "velocity_scale": float(self.velocity_scale),
             "joint_index": float(self.joint_index),
         }
 
@@ -165,6 +171,8 @@ class ObjectCenteringStrategy:
         min_command_delay_s: float = 3.0,
         require_new_frame: bool = True,
         frame_wait_tolerance: float = 0.02,
+        velocity_gain: float = 0.02,
+        max_velocity: float = 1.0,
     ) -> None:
         if calibration is None:
             candidate_path = Path(calibration_path) if calibration_path is not None else DEFAULT_CALIBRATION_PATH
@@ -217,8 +225,36 @@ class ObjectCenteringStrategy:
         self._next_command_time = 0.0
         self._require_new_frame = bool(require_new_frame)
         self._frame_wait_tolerance = max(0.0, float(frame_wait_tolerance))
+        self._velocity_gain = max(0.0, float(velocity_gain))
+        self._max_velocity = max(0.0, float(max_velocity))
         self._await_new_frame = False
         self._last_command_frame_ts: Optional[float] = None
+
+        # PID controllers for each axis
+        # PID Tuning Guide:
+        # - Kp (Proportional): Controls responsiveness. Increase for faster response, decrease for stability.
+        # - Ki (Integral): Eliminates steady-state error. Increase if it doesn't settle on target, decrease if oscillating.
+        # - Kd (Derivative): Dampens oscillations. Increase if swaying/overshooting, decrease if too sluggish.
+        # - Start with Ki=0, Kd=0, tune Kp until it oscillates, then add Kd to stabilize, finally Ki for precision.
+        # - Monitor logs for scale values; adjust gains in small increments (e.g., 0.001-0.01).
+        self._pid_horizontal = {
+            'kp': 0.02,  # proportional gain
+            'ki': 0.001,  # integral gain
+            'kd': 0.005,  # derivative gain
+            'integral': 0.0,
+            'prev_error': 0.0,
+            'prev_time': time.time(),
+            'integral_max': 1.0  # anti-windup
+        }
+        self._pid_vertical = {
+            'kp': 0.02,
+            'ki': 0.001,
+            'kd': 0.005,
+            'integral': 0.0,
+            'prev_error': 0.0,
+            'prev_time': time.time(),
+            'integral_max': 1.0
+        }
 
         if display_feed and cv2 is None:
             logger.warning("display_feed requested but OpenCV is not available; disabling preview")
@@ -232,12 +268,14 @@ class ObjectCenteringStrategy:
         self._worker: Optional[threading.Thread] = None
         self._last_command_time = 0.0
         self._last_status: Dict[str, Any] = {}
+        self._last_axis_errors: List[AxisError] = []
 
     # ------------------------------------------------------------------
     # Public API
     def start(self, *, poll_interval: float = 0.05) -> None:
         if self._worker and self._worker.is_alive():
             return
+        self._dt = max(0.0, float(poll_interval))
         self._stop_event.clear()
         self._worker = threading.Thread(
             target=self._run_loop,
@@ -246,9 +284,11 @@ class ObjectCenteringStrategy:
             daemon=True,
         )
         self._worker.start()
+        self._detector.start(poll_interval=poll_interval)
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._detector.stop()
         if self._worker:
             self._worker.join(timeout=1.0)
         self._worker = None
@@ -257,12 +297,15 @@ class ObjectCenteringStrategy:
     def step(self) -> Optional[Dict[str, Any]]:
         result = self._detector.detect(return_frame=True)
         if result is None:
-            self._update_satisfaction_marker(None, None, None)
+            self._last_axis_errors = []
             self._record_status({"state": "no_frame"})
             return None
 
+        latency = time.time() - result.timestamp
+        logger.debug(f"Object centering latency: {latency:.3f}s")
+
         if result.frame is None or not result.detections:
-            self._update_satisfaction_marker(None, None, None)
+            self._last_axis_errors = []
             self._maybe_display_frame(result, None, None, None, [])
             self._record_status({"state": "no_detections", "timestamp": result.timestamp})
             self._clear_active_target()
@@ -270,7 +313,7 @@ class ObjectCenteringStrategy:
 
         detection = self._selector.select(result.detections)
         if detection is None:
-            self._update_satisfaction_marker(None, None, None)
+            self._last_axis_errors = []
             self._maybe_display_frame(result, None, None, None, [])
             self._record_status(
                 {
@@ -290,164 +333,29 @@ class ObjectCenteringStrategy:
         error_x = bbox_center[0] - (width / 2.0)
         error_y = bbox_center[1] - (height / 2.0)
 
-        scale_x = self._resolution_scale(self._calibration.reference_width, width)
-        scale_y = self._resolution_scale(self._calibration.reference_height, height)
+        axis_errors = self._compute_axis_errors(error_x, error_y, width, height)
+        self._last_axis_errors = axis_errors
 
-        wall_now = time.time()
-        latency_seconds = max(0.0, wall_now - float(result.timestamp))
-
-        monotonic_now = time.monotonic()
-        if self._min_command_delay > 0.0 and monotonic_now < self._next_command_time:
-            remaining = self._next_command_time - monotonic_now
-            satisfied_cooldown = self._update_satisfaction_marker(result.timestamp, error_x, error_y)
-            self._last_latency = float(latency_seconds)
-            self._maybe_display_frame(result, detection, error_x, error_y, [], None, None)
-            payload = {
-                "timestamp": result.timestamp,
-                "target": detection.to_dict(),
-                "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
-                "deltas": {},
-                "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
-                "satisfied": bool(satisfied_cooldown),
-                "awaiting_frame": bool(self._await_new_frame),
-                "cooldown_seconds": float(max(0.0, remaining)),
-                "latency_seconds": float(latency_seconds),
-                "latency_scale": float(self._last_latency_scale),
-                "swing_scale": float(self._current_swing_scale),
-                "total_scale": float(self._last_total_scale),
-            }
-            self._record_status({"state": "cooldown", **payload})
-            return payload
-
-        if self._require_new_frame and self._await_new_frame:
-            last_frame_ts = self._last_command_frame_ts
-            if last_frame_ts is not None and result.timestamp <= last_frame_ts + self._frame_wait_tolerance:
-                satisfied_wait = self._update_satisfaction_marker(result.timestamp, error_x, error_y)
-                self._last_latency = float(latency_seconds)
-                self._maybe_display_frame(result, detection, error_x, error_y, [], None, None)
-                payload = {
-                    "timestamp": result.timestamp,
-                    "target": detection.to_dict(),
-                    "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
-                    "deltas": {},
-                    "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
-                    "satisfied": bool(satisfied_wait),
-                    "awaiting_frame": True,
-                    "latency_seconds": float(latency_seconds),
-                    "latency_scale": float(self._last_latency_scale),
-                    "swing_scale": float(self._current_swing_scale),
-                    "total_scale": float(self._last_total_scale),
-                }
-                self._record_status({"state": "awaiting_frame", **payload})
-                return payload
-            self._await_new_frame = False
-            self._last_command_frame_ts = None
-
-        lead_time = latency_seconds + self._latency_compensation_s
-        predicted_x, predicted_y = self._anticipate_error(error_x, error_y, float(result.timestamp), lead_time)
-
-        command_x = self._apply_error_filter(predicted_x, self._filtered_error_x)
-        command_y = self._apply_error_filter(predicted_y, self._filtered_error_y)
-        self._filtered_error_x = command_x
-        self._filtered_error_y = command_y
-        swing_scale = self._update_swing_damping(command_x, command_y)
-        self._current_swing_scale = swing_scale
-        latency_scale_preview = self._compute_latency_scale(latency_seconds)
-        total_scale_preview = max(0.1, min(1.0, latency_scale_preview * swing_scale))
-        self._last_latency = float(latency_seconds)
-        self._last_latency_scale = float(latency_scale_preview)
-        self._last_total_scale = float(total_scale_preview)
-
-        axis_errors = self._compute_axis_errors(command_x, command_y, width, height)
-        satisfied = self._update_satisfaction_marker(result.timestamp, error_x, error_y)
-        display_axis_errors = [] if satisfied else axis_errors
-        predicted_tuple: Optional[Tuple[float, float]] = (predicted_x, predicted_y)
-        command_tuple: Optional[Tuple[float, float]] = (command_x, command_y)
+        display_axis_errors = axis_errors
         self._maybe_display_frame(
             result,
             detection,
             error_x,
             error_y,
             display_axis_errors,
-            predicted_tuple,
-            command_tuple,
+            None,
+            None,
         )
-
-        if satisfied:
-            effective_scale = float(self._current_swing_scale * self._last_latency_scale)
-            payload = {
-                "timestamp": result.timestamp,
-                "target": detection.to_dict(),
-                "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
-                "predicted_errors": {
-                    "x_pixels": float(predicted_x),
-                    "y_pixels": float(predicted_y),
-                },
-                "command_errors": {
-                    "x_pixels": float(command_x),
-                    "y_pixels": float(command_y),
-                },
-                "deltas": {},
-                "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
-                "satisfied": True,
-                "latency_seconds": float(latency_seconds),
-                "latency_scale": float(self._last_latency_scale),
-                "swing_scale": float(self._current_swing_scale),
-                "total_scale": effective_scale,
-            }
-            self._record_status({"state": "hold", **payload})
-            return payload
-
-        if not axis_errors:
-            effective_scale = float(self._current_swing_scale * self._last_latency_scale)
-            payload = {
-                "timestamp": result.timestamp,
-                "target": detection.to_dict(),
-                "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
-                "deltas": {},
-                "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
-                "satisfied": False,
-                "predicted_errors": {
-                    "x_pixels": float(predicted_x),
-                    "y_pixels": float(predicted_y),
-                },
-                "command_errors": {
-                    "x_pixels": float(command_x),
-                    "y_pixels": float(command_y),
-                },
-                "latency_seconds": float(latency_seconds),
-                "latency_scale": float(self._last_latency_scale),
-                "swing_scale": float(self._current_swing_scale),
-                "total_scale": effective_scale,
-            }
-            self._record_status({"state": "within_deadband", **payload})
-            return payload
-
-        deltas = {axis_error.joint_index: axis_error.delta_radians for axis_error in axis_errors}
-        if not self._apply_joint_deltas(deltas, latency_seconds, result.timestamp):
-            return None
 
         payload = {
             "timestamp": result.timestamp,
             "target": detection.to_dict(),
             "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
-            "deltas": {idx: float(delta) for idx, delta in deltas.items()},
-            "resolution_scale": {"x": float(scale_x), "y": float(scale_y)},
+            "velocity_scales": {axis_error.joint_index: axis_error.velocity_scale for axis_error in axis_errors},
+            "resolution_scale": {"x": 1.0, "y": 1.0},
             "satisfied": False,
-            "predicted_errors": {
-                "x_pixels": float(predicted_x),
-                "y_pixels": float(predicted_y),
-            },
-            "command_errors": {
-                "x_pixels": float(command_x),
-                "y_pixels": float(command_y),
-            },
-            "latency_seconds": float(latency_seconds),
-            "latency_scale": float(self._last_latency_scale),
-            "swing_scale": float(self._current_swing_scale),
-            "total_scale": float(self._last_total_scale),
         }
-        self._record_status({"state": "command_sent", **payload})
+        self._record_status({"state": "active", **payload})
         return payload
 
     def set_target_label(self, label: Optional[str]) -> None:
@@ -492,6 +400,7 @@ class ObjectCenteringStrategy:
         axis_errors: List[AxisError] = []
         horizontal = self._calibration.horizontal
         vertical = self._calibration.vertical
+        current_time = time.time()
         if horizontal:
             effective_error = -error_x if self._invert_horizontal else error_x
             scaled_error = self._scale_error_for_resolution(
@@ -499,9 +408,25 @@ class ObjectCenteringStrategy:
                 reference_dimension=self._calibration.reference_width,
                 current_dimension=frame_width,
             )
-            delta = self._pixel_error_to_delta(scaled_error, horizontal)
-            if delta is not None:
-                axis_errors.append(AxisError(error_x, delta, horizontal.joint_index))
+            # PID control
+            dt = current_time - self._pid_horizontal['prev_time']
+            if dt > 0:
+                p = self._pid_horizontal['kp'] * scaled_error
+                self._pid_horizontal['integral'] += scaled_error * dt
+                self._pid_horizontal['integral'] = max(-self._pid_horizontal['integral_max'], min(self._pid_horizontal['integral_max'], self._pid_horizontal['integral']))
+                i = self._pid_horizontal['ki'] * self._pid_horizontal['integral']
+                d = self._pid_horizontal['kd'] * (scaled_error - self._pid_horizontal['prev_error']) / dt
+                velocity_scale = p + i + d
+                self._pid_horizontal['prev_error'] = scaled_error
+                self._pid_horizontal['prev_time'] = current_time
+            else:
+                velocity_scale = 0.0
+            if horizontal.invert:
+                velocity_scale *= -1
+            distance_factor = abs(scaled_error) / (abs(scaled_error) + 100.0)
+            velocity_scale *= distance_factor
+            axis_errors.append(AxisError(error_x, velocity_scale, horizontal.joint_index))
+            logger.debug(f"Horizontal: error_x={error_x:.1f}, scaled={scaled_error:.1f}, scale={velocity_scale:.3f}")
         if vertical:
             effective_error = -error_y if self._invert_vertical else error_y
             scaled_error = self._scale_error_for_resolution(
@@ -509,9 +434,25 @@ class ObjectCenteringStrategy:
                 reference_dimension=self._calibration.reference_height,
                 current_dimension=frame_height,
             )
-            delta = self._pixel_error_to_delta(scaled_error, vertical)
-            if delta is not None:
-                axis_errors.append(AxisError(error_y, delta, vertical.joint_index))
+            # PID control
+            dt = current_time - self._pid_vertical['prev_time']
+            if dt > 0:
+                p = self._pid_vertical['kp'] * scaled_error
+                self._pid_vertical['integral'] += scaled_error * dt
+                self._pid_vertical['integral'] = max(-self._pid_vertical['integral_max'], min(self._pid_vertical['integral_max'], self._pid_vertical['integral']))
+                i = self._pid_vertical['ki'] * self._pid_vertical['integral']
+                d = self._pid_vertical['kd'] * (scaled_error - self._pid_vertical['prev_error']) / dt
+                velocity_scale = p + i + d
+                self._pid_vertical['prev_error'] = scaled_error
+                self._pid_vertical['prev_time'] = current_time
+            else:
+                velocity_scale = 0.0
+            if vertical.invert:
+                velocity_scale *= -1
+            distance_factor = abs(scaled_error) / (abs(scaled_error) + 50.0)
+            velocity_scale *= distance_factor
+            axis_errors.append(AxisError(error_y, velocity_scale, vertical.joint_index))
+            logger.info(f"Vertical: error_y={error_y:.1f}, scaled={scaled_error:.1f}, scale={velocity_scale:.3f}")
         return axis_errors
 
     def _clear_active_target(self) -> None:
@@ -530,6 +471,11 @@ class ObjectCenteringStrategy:
         self._await_new_frame = False
         self._last_command_frame_ts = None
         self._next_command_time = 0.0
+        # Reset PID
+        self._pid_horizontal['integral'] = 0.0
+        self._pid_horizontal['prev_error'] = 0.0
+        self._pid_vertical['integral'] = 0.0
+        self._pid_vertical['prev_error'] = 0.0
 
     @staticmethod
     def _scale_error_for_resolution(
@@ -597,70 +543,18 @@ class ObjectCenteringStrategy:
             return True
         return False
 
-    def _apply_joint_deltas(
-        self,
-        deltas: Dict[int, float],
-        latency_seconds: float,
-        frame_timestamp: Optional[float],
-    ) -> bool:
-        if not deltas:
-            return False
-        now = time.monotonic()
-        if now - self._last_command_time < self._command_interval:
-            return False
+    def get_current_velocity_scales(self) -> Dict[int, float]:
+        with self._lock:
+            return {ae.joint_index: ae.velocity_scale for ae in self._last_axis_errors}
 
-        if self._use_motion_queue and self._motion_service is not None and self._motion_service.is_busy():
-            logger.debug("Skipping centering command; motion service is busy")
-            return False
-
-        latency_scale = self._compute_latency_scale(latency_seconds)
-        swing_scale = self._current_swing_scale
-        total_scale = max(0.1, min(1.0, latency_scale * swing_scale))
-        self._last_latency = float(latency_seconds)
-        self._last_latency_scale = float(latency_scale)
-        self._last_total_scale = float(total_scale)
-
-        driver = self._resolve_driver()
-        feedback = driver.get_feedback()
-        current_q = list(feedback.get("q", []))
-        if not current_q:
-            logger.warning("Driver feedback missing joint positions; skipping centering command")
-            return False
-
-        target_q = current_q[:]
-        for joint_index, delta in deltas.items():
-            if joint_index < 0 or joint_index >= len(target_q):
-                logger.debug("Skipping joint %s outside available range", joint_index)
-                continue
-            target_q[joint_index] = current_q[joint_index] - (delta * total_scale)
-
-        if all(math.isclose(a, b, abs_tol=1e-6) for a, b in zip(target_q, current_q)):
-            return False
-
-        self._dispatch_joint_targets(target_q)
-        self._last_command_time = now
-        if self._require_new_frame:
-            if self._min_command_delay > 0.0:
-                self._next_command_time = time.monotonic() + self._min_command_delay
-            self._await_new_frame = True
-            if frame_timestamp is not None:
-                self._last_command_frame_ts = float(frame_timestamp)
-            else:
-                self._last_command_frame_ts = time.time()
-        else:
-            self._await_new_frame = False
-            self._last_command_frame_ts = None
-            if self._min_command_delay > 0.0:
-                self._next_command_time = time.monotonic() + self._min_command_delay
-        return True
-
-    def _dispatch_joint_targets(self, targets: Sequence[float]) -> None:
+    def _dispatch_joint_targets(self, targets: Sequence[float], duration_s: Optional[float] = None) -> None:
+        duration = duration_s if duration_s is not None else self._move_duration
         if self._use_motion_queue and self._motion_service is not None:
-            command = JointCommand(list(targets), duration_s=self._move_duration)
+            command = JointCommand(list(targets), duration_s=duration)
             self._motion_service.enqueue(command)
         else:
             driver = self._resolve_driver()
-            driver.send_joint_targets(list(targets), t_s=self._move_duration)
+            driver.send_joint_targets(list(targets), t_s=duration)
 
     def _maybe_display_frame(
         self,
@@ -703,7 +597,7 @@ class ObjectCenteringStrategy:
             f"scale lat:{self._last_latency_scale:.2f} swing:{self._current_swing_scale:.2f} tot:{self._last_total_scale:.2f}"
         )
         for axis_error in axis_errors:
-            deg = math.degrees(axis_error.delta_radians)
+            deg = math.degrees(axis_error.velocity_scale * self._dt * self._max_velocity)
             overlay_lines.append(f"joint {axis_error.joint_index}: {deg:.2f} deg")
         if overlay_lines:
             y_offset = 20

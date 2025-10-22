@@ -47,6 +47,7 @@ class TeleopController:
         """
         # Get events to start/stop velocities
         events = self.input_controller.get_events()
+        logger.debug(f"TeleopController events: {events}")
         now = time.time()
         for event, joint, scale in events:
             if isinstance(joint, str):

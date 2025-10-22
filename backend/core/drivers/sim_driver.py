@@ -19,3 +19,5 @@ class SimDriver:
     def close_gripper(self): print("SimDriver gripper closed")
     def open_gripper(self): print("SimDriver gripper opened")
     def set_gripper_position(self, position: float): print(f"SimDriver gripper set to {position}")
+    def start_joint_velocity(self, joint_index: int, scale: float): print(f"SimDriver starting velocity on joint {joint_index} with scale {scale}")
+    def stop_joint_velocity(self, joint_index: int): print(f"SimDriver stopping velocity on joint {joint_index}")
