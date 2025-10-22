@@ -22,11 +22,7 @@ from ..calibration.object_centering import (
     ObjectCenteringCalibration,
     load_calibration,
 )
-from ..detectors.object.object_detector import (
-    DetectionResult,
-    ObjectDetection,
-    ObjectDetector,
-)
+from ..detectors.base_detector import BaseDetector, Detection, DetectionResult
 from ...motion_service import JointCommand, MotionService
 
 logger = logging.getLogger(__name__)
@@ -97,7 +93,7 @@ class TargetSelector:
     def clear_lock(self) -> None:
         self._active_label = None
 
-    def select(self, detections: Sequence[ObjectDetection]) -> Optional[ObjectDetection]:
+    def select(self, detections: Sequence[Detection]) -> Optional[Detection]:
         candidates = [d for d in detections if d.confidence >= self._min_confidence]
         if not candidates:
             return None
@@ -122,16 +118,16 @@ class TargetSelector:
         return fallback
 
     @staticmethod
-    def _score_detection(detection: ObjectDetection) -> Tuple[float, float]:
+    def _score_detection(detection: Detection) -> Tuple[float, float]:
         bbox = detection.bbox
         area = bbox.width * bbox.height
         return (detection.confidence, area)
 
     @staticmethod
     def _best_label_match(
-        detections: Sequence[ObjectDetection],
+        detections: Sequence[Detection],
         labels: Iterable[str],
-    ) -> Optional[ObjectDetection]:
+    ) -> Optional[Detection]:
         label_set = {label.lower() for label in labels}
         labeled = [d for d in detections if d.label.lower() in label_set]
         if not labeled:
@@ -144,7 +140,7 @@ class ObjectCenteringStrategy:
 
     def __init__(
         self,
-        detector: ObjectDetector,
+        detector: BaseDetector,
         *,
         motion_service: Optional[MotionService] = None,
         driver: Optional[ArmDriverProtocol] = None,
@@ -202,7 +198,7 @@ class ObjectCenteringStrategy:
         self._satisfied_error_pixels = max(0.0, float(satisfied_error_pixels))
         self._satisfied_duration = max(0.0, float(satisfied_duration))
         self._satisfied_since: Optional[float] = None
-        self._active_target: Optional[ObjectDetection] = None
+        self._active_target: Optional[Detection] = None
         self._latency_compensation_s = max(0.0, float(latency_compensation_s))
         self._latency_slowdown = max(0.0, float(latency_slowdown))
         self._prediction_limit_px = max(0.0, float(prediction_limit_px))
@@ -288,7 +284,7 @@ class ObjectCenteringStrategy:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._detector.stop()
+        self._detector.close()
         if self._worker:
             self._worker.join(timeout=1.0)
         self._worker = None
@@ -559,7 +555,7 @@ class ObjectCenteringStrategy:
     def _maybe_display_frame(
         self,
         result: DetectionResult,
-        target: Optional[ObjectDetection],
+        target: Optional[Detection],
         error_x: Optional[float],
         error_y: Optional[float],
         axis_errors: Sequence[AxisError],

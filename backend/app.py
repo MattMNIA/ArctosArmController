@@ -26,6 +26,8 @@ import threading
 import time
 
 import argparse
+import signal
+import sys
 
 # Initialize Socket.IO with proper configuration
 socketio = SocketIO(
@@ -42,6 +44,14 @@ def create_app(drivers_list):
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
     logger = logging.getLogger(__name__)
+    
+    # Set up signal handler for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info("Received signal %d, shutting down...", signum)
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     # Initialize Drivers
     drivers = []
@@ -170,20 +180,26 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("Shutting down...")
         finally:
+            print("Stopping teleoperation...")
             try:
                 teleop_manager.stop()
-            except Exception:
-                pass
+                print("Teleop manager stopped")
+            except Exception as e:
+                print(f"Error stopping teleop manager: {e}")
             try:
                 app.config['motion_service'].stop()
-            except Exception:
-                pass
+                print("Motion service stopped")
+            except Exception as e:
+                print(f"Error stopping motion service: {e}")
             if flask_thread and flask_thread.is_alive():
                 try:
                     socketio.stop()
-                except Exception:
-                    pass
+                    print("SocketIO stopped")
+                except Exception as e:
+                    print(f"Error stopping SocketIO: {e}")
                 flask_thread.join(timeout=5.0)
+                print("Flask thread joined")
+            print("Shutdown complete")
     else:
         # Run Flask server normally
         print("Starting Flask server without teleoperation...")

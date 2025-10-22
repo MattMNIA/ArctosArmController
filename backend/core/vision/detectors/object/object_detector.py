@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -20,6 +19,7 @@ import numpy as np
 
 from ...camera_manager import CameraManager
 from ...cameras import CameraBase
+from ..base_detector import BaseDetector, BoundingBox, Detection, DetectionResult
 
 try:  # Ultralytics provides the YOLO (YOLOv8/YOLOv9/YoloE) implementation we target.
 	import ultralytics  # type: ignore[import]
@@ -32,71 +32,7 @@ else:  # pragma: no cover - the attribute is only used when import succeeds.
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class BoundingBox:
-	"""Axis-aligned bounding box expressed in absolute pixel coordinates."""
-
-	x1: float
-	y1: float
-	x2: float
-	y2: float
-
-	@property
-	def width(self) -> float:
-		return max(0.0, self.x2 - self.x1)
-
-	@property
-	def height(self) -> float:
-		return max(0.0, self.y2 - self.y1)
-
-	def center(self) -> Tuple[float, float]:
-		return (self.x1 + self.width * 0.5, self.y1 + self.height * 0.5)
-
-	def as_xyxy(self) -> Tuple[float, float, float, float]:
-		return (self.x1, self.y1, self.x2, self.y2)
-
-	def as_xywh(self) -> Tuple[float, float, float, float]:
-		return (self.x1, self.y1, self.width, self.height)
-
-
-@dataclass(frozen=True)
-class ObjectDetection:
-	"""Single detection returned by YOLO with metadata useful for strategies."""
-
-	label: str
-	confidence: float
-	bbox: BoundingBox
-	class_id: Optional[int] = None
-	tracker_id: Optional[int] = None
-
-	def to_dict(self) -> Dict[str, Any]:
-		return {
-			"label": self.label,
-			"confidence": float(self.confidence),
-			"bbox": self.bbox.as_xyxy(),
-			"bbox_xywh": self.bbox.as_xywh(),
-			"center": self.bbox.center(),
-			"classId": self.class_id,
-			"trackerId": self.tracker_id,
-		}
-
-
-@dataclass
-class DetectionResult:
-	"""Detection payload containing the frame timestamp and all detections."""
-
-	timestamp: float
-	detections: List[ObjectDetection]
-	frame: Optional[np.ndarray] = None
-
-	def to_strategy_payload(self) -> Dict[str, Any]:
-		return {
-			"timestamp": self.timestamp,
-			"detections": [detection.to_dict() for detection in self.detections],
-		}
-
-
-class ObjectDetector:
+class ObjectDetector(BaseDetector):
 	"""High-level helper that couples a camera with a YOLO (YoloE) model."""
 
 	def __init__(
@@ -162,6 +98,8 @@ class ObjectDetector:
 	def close(self) -> None:
 		self.stop()
 		with self._lock:
+			if self._camera is not None:
+				self._camera.release()
 			self._camera = None
 
 	def detect(
@@ -227,7 +165,7 @@ class ObjectDetector:
 	def apply_overlays(
 		self,
 		frame: np.ndarray,
-		detections: Iterable[ObjectDetection],
+		detections: Iterable[Detection],
 		*,
 		color: Tuple[int, int, int] = (0, 255, 0),
 		thickness: int = 2,
@@ -306,7 +244,7 @@ class ObjectDetector:
 			return frame
 		return cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
 
-	def _run_inference(self, model: Any, frame: np.ndarray) -> List[ObjectDetection]:
+	def _run_inference(self, model: Any, frame: np.ndarray) -> List[Detection]:
 		predict_kwargs: Dict[str, Any] = {
 			"conf": self._confidence,
 			"iou": self._iou,
@@ -371,7 +309,7 @@ class ObjectDetector:
 			else:
 				label = str(class_id) if class_id is not None else "unknown"
 			detections.append(
-				ObjectDetection(
+				Detection(
 					label=label,
 					confidence=confidence,
 					bbox=BoundingBox(
@@ -381,7 +319,7 @@ class ObjectDetector:
 						y2=float(y2),
 					),
 					class_id=class_id,
-					tracker_id=tracker_id,
+					track_id=tracker_id,
 				)
 			)
 		return detections

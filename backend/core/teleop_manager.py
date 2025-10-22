@@ -27,26 +27,31 @@ class TeleopManager:
             "label": "Keyboard",
             "description": "Map WASD-style keyboard input to joint velocity control.",
             "supportsOptions": False,
+            "type": "primary",
         },
         "xbox": {
             "label": "Xbox Controller",
             "description": "Use an Xbox gamepad for analog joint velocity control.",
             "supportsOptions": False,
+            "type": "primary",
         },
         "fingers": {
             "label": "Finger Tracking",
             "description": "Experimental finger-gesture controller.",
             "supportsOptions": False,
+            "type": "primary",
         },
         "finger-sliders": {
             "label": "Finger Sliders",
             "description": "Finger-tracking input with virtual sliders.",
             "supportsOptions": False,
+            "type": "primary",
         },
         "object-centering": {
             "label": "Object Centering",
             "description": "Autonomously center the preferred detection label in view.",
             "supportsOptions": True,
+            "type": "primary",
             "options": {
                 "centerLabel": {
                     "type": "string",
@@ -57,6 +62,12 @@ class TeleopManager:
                     "type": "string",
                     "label": "Detector model",
                     "placeholder": "yolov8n.pt",
+                },
+                "detectorType": {
+                    "type": "string",
+                    "label": "Detector type",
+                    "default": "object",
+                    "options": ["object", "face"],
                 },
                 "displayFeed": {
                     "type": "boolean",
@@ -73,6 +84,11 @@ class TeleopManager:
                     "label": "Invert vertical",
                     "default": False,
                 },
+                "enableGestures": {
+                    "type": "boolean",
+                    "label": "Enable gesture recognition",
+                    "default": False,
+                },
             },
         },
     }
@@ -84,11 +100,22 @@ class TeleopManager:
             raise TeleopManagerError("Motion service does not have an attached driver")
         self._driver = cast(DriverProtocol, driver)
         self._lock = threading.Lock()
-        self._teleop_controller: Optional[TeleopController] = None
-        self._input_controller: Optional[InputController] = None
+        
+        # Primary control mode
+        self._primary_controller: Optional[TeleopController] = None
+        self._primary_input: Optional[InputController] = None
+        self._primary_mode: Optional[str] = None
+        
+        # Gesture overlay
+        self._gesture_controller: Optional[TeleopController] = None
+        self._gesture_input: Optional[InputController] = None
+        self._gesture_mode: Optional[str] = None
+        self._gesture_enabled: bool = False
+        
+        # Control state
+        self._paused: bool = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._current_mode: Optional[str] = None
         self._last_error: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -101,21 +128,27 @@ class TeleopManager:
 
     def current_state(self) -> Dict[str, Any]:
         with self._lock:
-            controller = self._teleop_controller
-            mode = self._current_mode
-            running = controller is not None and self._thread is not None and self._thread.is_alive()
+            primary_mode = self._primary_mode
+            running = (self._primary_controller is not None or self._gesture_controller is not None) and self._thread is not None and self._thread.is_alive()
+            paused = self._paused
             last_error = self._last_error
         return {
-            "mode": mode,
+            "primaryMode": primary_mode,
             "running": running,
+            "paused": paused,
             "lastError": last_error,
         }
 
     def start_mode(self, mode: str, *, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Start a primary control mode."""
         options = options or {}
         normalized_mode = (mode or "").strip().lower()
         if normalized_mode not in self._AVAILABLE_MODES:
             raise TeleopManagerError(f"Unknown teleoperation mode '{mode}'")
+
+        mode_info = self._AVAILABLE_MODES[normalized_mode]
+        if mode_info.get("type") != "primary":
+            raise TeleopManagerError(f"Mode '{mode}' is not a primary control mode")
 
         if not self._motion_service.running:
             raise TeleopManagerError("Motion service is not running")
@@ -123,79 +156,156 @@ class TeleopManager:
         input_controller = self._create_input_controller(normalized_mode, options)
         teleop_controller = TeleopController(input_controller, self._driver, self._motion_service)
 
-        # For object-centering mode, start unpaused since it's autonomous
-        if normalized_mode == "object-centering":
-            teleop_controller._paused = False
-
         with self._lock:
+            # Stop existing control thread and controller
             self._stop_locked()
-            self._teleop_controller = teleop_controller
-            self._input_controller = input_controller
-            self._current_mode = normalized_mode
-            self._last_error = None
-            self._stop_event.clear()
-            loop_interval = 1.0 / getattr(teleop_controller, "teleop_hz", 50.0)
-            self._thread = threading.Thread(
-                target=self._loop,
-                name=f"teleop-{normalized_mode}",
-                args=(loop_interval,),
-                daemon=True,
-            )
-            self._thread.start()
+            
+            # Stop existing primary controller
+            if self._primary_controller is not None:
+                try:
+                    self._primary_controller.stop_all()
+                except Exception:
+                    logger.debug("Error stopping previous primary controller", exc_info=True)
+                if self._primary_input is not None:
+                    close_method = getattr(self._primary_input, "close", None)
+                    if callable(close_method):
+                        try:
+                            close_method()
+                        except Exception:
+                            logger.debug("Error closing previous primary input", exc_info=True)
 
-        logger.info("Teleoperation mode '%s' activated", normalized_mode)
+            self._primary_controller = teleop_controller
+            self._primary_input = input_controller
+            self._primary_mode = normalized_mode
+            self._paused = False  # Start unpaused
+
+            # Start new control thread
+            self._start_control_thread_locked()
+
+        logger.info("Primary teleoperation mode '%s' activated", normalized_mode)
+        return self.current_state()
+
+
+    def pause(self) -> Dict[str, Any]:
+        """Pause the current primary mode (if pausable)."""
+        with self._lock:
+            if self._primary_mode == "object-centering" and self._primary_controller is not None:
+                self._primary_controller._pause_teleop()
+                self._paused = True
+            else:
+                raise TeleopManagerError("Current mode does not support pausing")
+
+        logger.info("Primary mode paused")
+        return self.current_state()
+
+    def resume(self) -> Dict[str, Any]:
+        """Resume the paused primary mode."""
+        with self._lock:
+            if self._primary_mode == "object-centering" and self._paused and self._primary_controller is not None:
+                self._primary_controller._resume_teleop()
+                self._paused = False
+            else:
+                raise TeleopManagerError("No paused mode to resume")
+
+        logger.info("Primary mode resumed")
         return self.current_state()
 
     def stop(self) -> None:
         with self._lock:
             self._stop_locked()
-            self._current_mode = None
+            self._primary_mode = None
+            self._gesture_mode = None
+            self._gesture_enabled = False
+            self._paused = False
             self._last_error = None
         logger.info("Teleoperation stopped")
 
     # ------------------------------------------------------------------
     # Internal helpers
+    def _start_control_thread_locked(self) -> None:
+        """Start the control thread if not already running."""
+        if self._thread is not None and self._thread.is_alive():
+            return  # Already running
+
+        self._stop_event.clear()
+        loop_interval = 1.0 / 50.0  # 50 Hz control loop
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="teleop-control",
+            args=(loop_interval,),
+            daemon=True,
+        )
+        self._thread.start()
+
     def _loop(self, interval: float) -> None:
         while not self._stop_event.is_set():
-            controller: Optional[TeleopController]
+            primary_controller = None
+            gesture_controller = None
+            
             with self._lock:
-                controller = self._teleop_controller
-            if controller is None:
-                break
-            try:
-                controller.teleop_step()
-            except Exception as exc:  # pragma: no cover - runtime protection
-                logger.exception("Teleoperation loop error: %s", exc)
-                with self._lock:
-                    self._last_error = str(exc)
-                time.sleep(interval)
-            else:
-                time.sleep(interval)
+                primary_controller = self._primary_controller
+                gesture_controller = self._gesture_controller if self._gesture_enabled else None
+
+            # Handle primary controller
+            if primary_controller is not None:
+                try:
+                    primary_controller.teleop_step()
+                except Exception as exc:
+                    logger.exception("Primary controller step failed: %s", exc)
+                    with self._lock:
+                        self._last_error = str(exc)
+
+            # Handle gesture controller (always active when enabled)
+            if gesture_controller is not None:
+                try:
+                    gesture_controller.teleop_step()
+                except Exception as exc:
+                    logger.exception("Gesture controller step failed: %s", exc)
+                    with self._lock:
+                        self._last_error = str(exc)
+
+            if interval > 0.0:
+                self._stop_event.wait(interval)
 
     def _stop_locked(self) -> None:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self._thread = None
-        controller = self._teleop_controller
-        input_controller = self._input_controller
-        self._teleop_controller = None
-        self._input_controller = None
-        self._stop_event.clear()
-
-        if controller is not None:
+        
+        # Stop primary controller
+        if self._primary_controller is not None:
             try:
-                controller.stop_all()
-            except Exception:  # pragma: no cover - best effort
-                logger.debug("Error while stopping teleop controller", exc_info=True)
-
-        if input_controller is not None:
-            close_method = getattr(input_controller, "close", None)
+                self._primary_controller.stop_all()
+            except Exception:
+                logger.debug("Error stopping primary controller", exc_info=True)
+        if self._primary_input is not None:
+            close_method = getattr(self._primary_input, "close", None)
             if callable(close_method):
                 try:
                     close_method()
-                except Exception:  # pragma: no cover - best effort cleanup
-                    logger.debug("Error while closing input controller", exc_info=True)
+                except Exception:
+                    logger.debug("Error closing primary input", exc_info=True)
+        
+        # Stop gesture controller
+        if self._gesture_controller is not None:
+            try:
+                self._gesture_controller.stop_all()
+            except Exception:
+                logger.debug("Error stopping gesture controller", exc_info=True)
+        if self._gesture_input is not None:
+            close_method = getattr(self._gesture_input, "close", None)
+            if callable(close_method):
+                try:
+                    close_method()
+                except Exception:
+                    logger.debug("Error closing gesture input", exc_info=True)
+
+        self._primary_controller = None
+        self._primary_input = None
+        self._gesture_controller = None
+        self._gesture_input = None
+        self._stop_event.clear()
 
     def _create_input_controller(self, mode: str, options: Dict[str, Any]) -> InputController:
         if mode == "keyboard":
@@ -211,17 +321,38 @@ class TeleopManager:
             labels = [preferred_label] if preferred_label else None
             display_feed = bool(options.get("displayFeed", False))
             detector_model = options.get("model") or options.get("detectorModel")
+            detector_type = options.get("detectorType", "object")
             invert_horizontal = bool(options.get("invertHorizontal", False))
             invert_vertical = bool(options.get("invertVertical", False))
+            enable_gestures = bool(options.get("enableGestures", False))
+            
+            # Configure detector arguments
+            detector_args = {}
+            if detector_model is not None:
+                detector_args["model"] = detector_model
+            detector_args["confidence_threshold"] = 0.7
+            detector_args["imgsz"] = 640  # Use standard size instead of 256
+            detector_args["max_frame_size"] = (640, 480)
+            
+            # Force CPU if CUDA not available
+            try:
+                import torch
+                if not torch.cuda.is_available():
+                    detector_args["device"] = "cpu"
+            except ImportError:
+                detector_args["device"] = "cpu"
+            
             return ObjectCenteringInput(
                 motion_service=self._motion_service,
                 driver=self._driver,
                 preferred_labels=labels,
-                detector_model=detector_model,
+                detector_type=detector_type,
+                detector_kwargs=detector_args,
                 use_motion_queue=True,
                 display_feed=display_feed,
                 invert_horizontal=invert_horizontal,
                 invert_vertical=invert_vertical,
+                enable_gestures=enable_gestures,
             )
         raise TeleopManagerError(f"Unsupported teleoperation mode '{mode}'")
 

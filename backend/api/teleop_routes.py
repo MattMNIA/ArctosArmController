@@ -63,12 +63,27 @@ def start_mode():
     return jsonify({'state': state})
 
 
-@teleop_bp.route('/stop', methods=['POST'])
-def stop_mode():
+@teleop_bp.route('/pause', methods=['POST'])
+def pause_mode():
     manager = _get_manager()
     try:
-        manager.stop()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Unexpected teleop stop failure")
-        return jsonify({'error': 'Failed to stop teleoperation mode'}), 500
-    return jsonify({'state': manager.current_state()})
+        state = manager.pause()
+    except TeleopManagerError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Unexpected pause failure")
+        return jsonify({'error': 'Failed to pause teleoperation mode'}), 500
+    return jsonify({'state': state})
+
+
+@teleop_bp.route('/resume', methods=['POST'])
+def resume_mode():
+    manager = _get_manager()
+    try:
+        state = manager.resume()
+    except TeleopManagerError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Unexpected resume failure")
+        return jsonify({'error': 'Failed to resume teleoperation mode'}), 500
+    return jsonify({'state': state})

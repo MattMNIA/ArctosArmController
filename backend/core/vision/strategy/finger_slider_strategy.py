@@ -2,6 +2,7 @@ import math
 import threading
 import time
 import warnings
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
@@ -10,6 +11,8 @@ import mediapipe as mp
 
 from ..cameras.local_camera import LocalCamera
 from ..detectors.gesture.gesture_recognizer import GestureRecognizer
+
+logger = logging.getLogger(__name__)
 
 
 class FingerSliderStrategy:
@@ -242,6 +245,7 @@ class FingerSliderStrategy:
         with self._lock:
             if self._hands:
                 self._hands.close()
+                self._hands = None
             if self._camera and self._camera.is_opened():
                 self._camera.release()
         if self._show_window:
@@ -263,7 +267,18 @@ class FingerSliderStrategy:
 
             frame = cv2.flip(frame, 1)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = self._hands.process(rgb)
+            
+            # Check if MediaPipe solution is still valid (not closed)
+            if self._hands is None or not hasattr(self._hands, 'process'):
+                logger.debug("FingerSliderStrategy._process_frame: MediaPipe solution is closed")
+                return None
+                
+            try:
+                results = self._hands.process(rgb)
+            except Exception as e:
+                logger.warning(f"FingerSliderStrategy._process_frame: MediaPipe process failed: {e}")
+                return None
+                
             frame_to_show = frame if self._show_window else None
         joint_values: Dict[int, float] = {idx: 0.0 for idx in self._joint_indices}
         prev_joint_values = dict(self._joint_state)
