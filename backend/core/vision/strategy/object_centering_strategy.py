@@ -169,7 +169,7 @@ class ObjectCenteringStrategy:
         min_command_delay_s: float = 3.0,
         require_new_frame: bool = True,
         frame_wait_tolerance: float = 0.02,
-        velocity_gain: float = 0.02,
+        velocity_gain: float = 0.5,
         max_velocity: float = 1.0,
         detection_buffer_frames: int = 3,
         detection_timeout_s: float = 0.5,
@@ -598,6 +598,7 @@ class ObjectCenteringStrategy:
                 velocity_scale *= -1
             distance_factor = abs(scaled_error) / (abs(scaled_error) + 100.0)
             velocity_scale *= distance_factor
+            velocity_scale = max(-self._max_velocity, min(self._max_velocity, velocity_scale))
             axis_errors.append(AxisError(error_x, velocity_scale, horizontal.joint_indices))
             logger.debug(f"Horizontal: error_x={error_x:.1f}, scaled={scaled_error:.1f}, scale={velocity_scale:.3f}")
         if vertical:
@@ -624,6 +625,7 @@ class ObjectCenteringStrategy:
                 velocity_scale *= -1
             distance_factor = abs(scaled_error) / (abs(scaled_error) + 50.0)
             velocity_scale *= distance_factor
+            velocity_scale = max(-self._max_velocity, min(self._max_velocity, velocity_scale))
             axis_errors.append(AxisError(error_y, velocity_scale, vertical.joint_indices))
             logger.info(f"Vertical: error_y={error_y:.1f}, scaled={scaled_error:.1f}, scale={velocity_scale:.3f}")
         return axis_errors
@@ -721,7 +723,7 @@ class ObjectCenteringStrategy:
             scales = {}
             for ae in self._last_axis_errors:
                 for joint_index in ae.joint_indices:  # Iterate over all joints for this axis
-                    scales[joint_index] = ae.velocity_scale
+                    scales[joint_index] = ae.velocity_scale * self._velocity_gain
             return scales
 
     def _dispatch_joint_targets(self, targets: Sequence[float], duration_s: Optional[float] = None) -> None:
