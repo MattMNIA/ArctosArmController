@@ -98,8 +98,6 @@ class ObjectDetector(BaseDetector):
 	def close(self) -> None:
 		self.stop()
 		with self._lock:
-			if self._camera is not None:
-				self._camera.release()
 			self._camera = None
 
 	def detect(

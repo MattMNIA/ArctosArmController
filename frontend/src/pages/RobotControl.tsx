@@ -23,14 +23,12 @@ type TeleopModeDefinition = {
   label: string;
   description: string;
   supportsOptions: boolean;
-  type?: string;
   options?: Record<string, TeleopModeOptionSchema>;
 };
 
 type TeleopStateSnapshot = {
-  primaryMode: string | null;
+  mode: string | null;
   running: boolean;
-  paused: boolean;
   lastError: string | null;
 };
 
@@ -46,7 +44,7 @@ export default function RobotControl() {
   const [useEulerAngles, setUseEulerAngles] = useState(false);
   const [solvedJoints, setSolvedJoints] = useState<number[] | null>(null);
   const [teleopModes, setTeleopModes] = useState<TeleopModeDefinition[]>([]);
-  const [teleopState, setTeleopState] = useState<TeleopStateSnapshot>({ primaryMode: null, running: false, paused: false, lastError: null });
+  const [teleopState, setTeleopState] = useState<TeleopStateSnapshot>({ mode: null, running: false, lastError: null });
   const [selectedTeleopMode, setSelectedTeleopMode] = useState<string>('');
   const [teleopOptions, setTeleopOptions] = useState<Record<string, any>>({});
   const [teleopBusy, setTeleopBusy] = useState(false);
@@ -80,12 +78,12 @@ export default function RobotControl() {
   );
 
   const activeModeLabel = useMemo(() => {
-    if (!teleopState.primaryMode) {
+    if (!teleopState.mode) {
       return 'None';
     }
-    const active = teleopModes.find((mode) => mode.id === teleopState.primaryMode);
-    return active?.label ?? teleopState.primaryMode;
-  }, [teleopModes, teleopState.primaryMode]);
+    const active = teleopModes.find((mode) => mode.id === teleopState.mode);
+    return active?.label ?? teleopState.mode;
+  }, [teleopModes, teleopState.mode]);
 
   const sanitizeTeleopOptions = useCallback((raw: Record<string, any>) => {
     const sanitized: Record<string, any> = {};
@@ -130,9 +128,8 @@ export default function RobotControl() {
       const data = await res.json();
       const state = data.state ?? data;
       setTeleopState({
-        primaryMode: state.primaryMode ?? null,
+        mode: state.mode ?? null,
         running: Boolean(state.running),
-        paused: Boolean(state.paused),
         lastError: state.lastError ?? null,
       });
     } catch (error) {
@@ -170,9 +167,8 @@ export default function RobotControl() {
       const data = await res.json();
       const state = data.state ?? data;
       setTeleopState({
-        primaryMode: state.primaryMode ?? null,
+        mode: state.mode ?? null,
         running: Boolean(state.running),
-        paused: Boolean(state.paused),
         lastError: state.lastError ?? null,
       });
       await fetchTeleopState();
@@ -209,9 +205,8 @@ export default function RobotControl() {
       const data = await res.json();
       const state = data.state ?? data;
       setTeleopState({
-        primaryMode: state.primaryMode ?? null,
+        mode: state.mode ?? null,
         running: Boolean(state.running),
-        paused: Boolean(state.paused),
         lastError: state.lastError ?? null,
       });
       await fetchTeleopState();
@@ -244,12 +239,12 @@ export default function RobotControl() {
       if (prev && teleopModes.some((mode) => mode.id === prev)) {
         return prev;
       }
-      const active = teleopState.primaryMode && teleopModes.some((mode) => mode.id === teleopState.primaryMode)
-        ? teleopState.primaryMode
+      const active = teleopState.mode && teleopModes.some((mode) => mode.id === teleopState.mode)
+        ? teleopState.mode
         : teleopModes[0].id;
       return active ?? prev;
     });
-  }, [teleopModes, teleopState.primaryMode]);
+  }, [teleopModes, teleopState.mode]);
 
   useEffect(() => {
     if (!selectedTeleopMode) {
@@ -262,7 +257,7 @@ export default function RobotControl() {
     setTeleopOptions(buildDefaultOptionsForMode(selectedTeleopMode));
   }, [buildDefaultOptionsForMode, selectedTeleopMode]);
 
-  const isSelectedModeRunning = teleopState.running && teleopState.primaryMode === selectedTeleopMode;
+  const isSelectedModeRunning = teleopState.running && teleopState.mode === selectedTeleopMode;
   const teleopStatusLabel = teleopState.running ? 'Active' : 'Idle';
   const startButtonLabel = teleopState.running
     ? (isSelectedModeRunning ? 'Restart Mode' : 'Switch Mode')
@@ -526,15 +521,9 @@ export default function RobotControl() {
                 </span>
               </div>
               <div>
-                <span className="text-gray-400 mr-2">Primary mode:</span>
+                <span className="text-gray-400 mr-2">Active mode:</span>
                 <span className="font-semibold">{activeModeLabel}</span>
               </div>
-              {teleopState.paused && (
-                <div>
-                  <span className="text-gray-400 mr-2">State:</span>
-                  <span className="font-semibold text-orange-400">Paused</span>
-                </div>
-              )}
             </div>
           </div>
 
@@ -558,7 +547,7 @@ export default function RobotControl() {
                 disabled={!teleopModes.length || teleopBusy}
                 className="w-full px-3 py-2 rounded-lg border border-gray-600 bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {teleopModes.filter(mode => mode.type !== 'gesture').map((mode) => (
+                {teleopModes.map((mode) => (
                   <option key={mode.id} value={mode.id}>
                     {mode.label}
                   </option>
@@ -642,49 +631,6 @@ export default function RobotControl() {
                     </div>
                   )
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Pause/Resume Controls for Object Centering */}
-          {teleopState.primaryMode === 'object-centering' && (
-            <div className="mt-6 border-t border-gray-700/60 pt-6">
-              <h3 className="text-sm font-semibold text-gray-300 mb-4">Object Centering Control</h3>
-              <div className="flex gap-3">
-                <AnimatedButton
-                  variant={teleopState.paused ? "success" : "secondary"}
-                  size="md"
-                  onClick={async () => {
-                    setTeleopBusy(true);
-                    try {
-                      const endpoint = teleopState.paused ? 'resume' : 'pause';
-                      const res = await fetch(`http://localhost:5000/api/teleop/${endpoint}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                      });
-                      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-                      const data = await res.json();
-                      setTeleopState({
-                        primaryMode: data.state.primaryMode ?? null,
-                        running: Boolean(data.state.running),
-                        paused: Boolean(data.state.paused),
-                        lastError: data.state.lastError ?? null,
-                      });
-                    } catch (error) {
-                      console.error(`Failed to ${teleopState.paused ? 'resume' : 'pause'}:`, error);
-                      setTeleopError(`Failed to ${teleopState.paused ? 'resume' : 'pause'} object centering`);
-                    } finally {
-                      setTeleopBusy(false);
-                    }
-                  }}
-                  disabled={teleopBusy}
-                  leftIcon={teleopState.paused ? <Play className="w-4 h-4" /> : <StopCircle className="w-4 h-4" />}
-                >
-                  {teleopState.paused ? 'Resume Centering' : 'Pause Centering'}
-                </AnimatedButton>
-                <div className="text-sm text-gray-400 self-center">
-                  {teleopState.paused ? 'Centering is paused' : 'Centering is active'}
-                </div>
               </div>
             </div>
           )}

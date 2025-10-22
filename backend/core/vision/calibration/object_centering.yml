@@ -1,12 +1,12 @@
 horizontal:
-  joint_index: 0
+  joint_indices: [0]
   pixels_per_degree: 7.2
   invert: false
   gain: 1.0
   deadband_pixels: 12.0
   max_delta_deg: 20.0
 vertical:
-  joint_index: 2
+  joint_indices: [1, 2]
   pixels_per_degree: 6.4
   invert: true
   gain: 1.0

@@ -121,10 +121,6 @@ class BaseDetector(ABC):
                 logger.warning("Detector thread did not stop within timeout")
             self._worker_thread = None
 
-    def close(self) -> None:
-        """Clean up resources."""
-        self.stop()
-
     def stream(
         self,
         *,

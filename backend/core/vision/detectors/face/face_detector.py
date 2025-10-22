@@ -33,7 +33,7 @@ class FaceDetector(BaseDetector):
         *,
         cascade_path: Optional[str] = None,
         scale_factor: float = 1.1,
-        min_neighbors: int = 8,  # Increased from 5 to reduce false positives
+        min_neighbors: int = 5,  # Reduced from 12 to improve detection reliability
         min_size: tuple[int, int] = (50, 50),  # Increased from (30, 30) to filter small detections
         max_size: Optional[tuple[int, int]] = None,
     ) -> None:
@@ -178,14 +178,16 @@ class FaceDetector(BaseDetector):
             self._last_result = result
         return result
 
-    def stop(self) -> None:
-        """Stop background detection."""
-        super().stop()
-        # Release camera when stopping
-        if self._camera is not None:
-            self._camera.release()
-            self._camera = None
-
-    def close(self) -> None:
-        """Clean up resources."""
-        self.stop()
+    def _loop(self, poll_interval: float) -> None:
+        import time
+        while not self._stop_event.is_set():
+            try:
+                result = self._detect_frame(None, copy_frame=False, return_frame=True)
+                if result is not None:
+                    result.timestamp = time.time()  # Set timestamp here
+                    with self._lock:
+                        self._last_result = result
+            except Exception as exc:
+                logger.exception("FaceDetector background loop failed: %s", exc)
+            if poll_interval > 0.0:
+                self._stop_event.wait(poll_interval)

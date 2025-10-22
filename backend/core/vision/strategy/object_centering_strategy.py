@@ -16,6 +16,8 @@ try:
 except ImportError:  # pragma: no cover - optional dependency for visualization
     cv2 = None  # type: ignore[assignment]
 
+import numpy as np
+
 from ..calibration.object_centering import (
     AxisCalibration,
     DEFAULT_CALIBRATION_PATH,
@@ -51,13 +53,13 @@ class AxisError:
 
     error_pixels: float
     velocity_scale: float
-    joint_index: int
+    joint_indices: list[int]  # Changed to support multiple joints
 
-    def as_dict(self) -> Dict[str, float]:
+    def as_dict(self) -> Dict[str, Any]:
         return {
             "error_pixels": float(self.error_pixels),
             "velocity_scale": float(self.velocity_scale),
-            "joint_index": float(self.joint_index),
+            "joint_indices": self.joint_indices,  # Updated
         }
 
 
@@ -169,6 +171,8 @@ class ObjectCenteringStrategy:
         frame_wait_tolerance: float = 0.02,
         velocity_gain: float = 0.02,
         max_velocity: float = 1.0,
+        detection_buffer_frames: int = 3,
+        detection_timeout_s: float = 0.5,
     ) -> None:
         if calibration is None:
             candidate_path = Path(calibration_path) if calibration_path is not None else DEFAULT_CALIBRATION_PATH
@@ -226,6 +230,12 @@ class ObjectCenteringStrategy:
         self._await_new_frame = False
         self._last_command_frame_ts: Optional[float] = None
 
+        # Detection buffering for smoother tracking
+        self._detection_buffer_frames = max(1, int(detection_buffer_frames))
+        self._detection_timeout_s = max(0.1, float(detection_timeout_s))
+        self._detection_buffer: Deque[Tuple[Detection, float]] = deque(maxlen=self._detection_buffer_frames)
+        self._last_detection_time: Optional[float] = None
+
         # PID controllers for each axis
         # PID Tuning Guide:
         # - Kp (Proportional): Controls responsiveness. Increase for faster response, decrease for stability.
@@ -234,16 +244,16 @@ class ObjectCenteringStrategy:
         # - Start with Ki=0, Kd=0, tune Kp until it oscillates, then add Kd to stabilize, finally Ki for precision.
         # - Monitor logs for scale values; adjust gains in small increments (e.g., 0.001-0.01).
         self._pid_horizontal = {
-            'kp': 0.02,  # proportional gain
-            'ki': 0.001,  # integral gain
-            'kd': 0.005,  # derivative gain
+            'kp': 0.01,  # Reduced from 0.02 to reduce oscillations
+            'ki': 0.001,  # Reduced from 0.002 to prevent instability
+            'kd': 0.008,  # Increased from 0.006 to better dampen oscillations
             'integral': 0.0,
             'prev_error': 0.0,
             'prev_time': time.time(),
             'integral_max': 1.0  # anti-windup
         }
         self._pid_vertical = {
-            'kp': 0.02,
+            'kp': 0.035,  # Increased from 0.02 to make vertical movement faster
             'ki': 0.001,
             'kd': 0.005,
             'integral': 0.0,
@@ -284,7 +294,7 @@ class ObjectCenteringStrategy:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._detector.close()
+        self._detector.stop()
         if self._worker:
             self._worker.join(timeout=1.0)
         self._worker = None
@@ -301,25 +311,125 @@ class ObjectCenteringStrategy:
         logger.debug(f"Object centering latency: {latency:.3f}s")
 
         if result.frame is None or not result.detections:
-            self._last_axis_errors = []
-            self._maybe_display_frame(result, None, None, None, [])
-            self._record_status({"state": "no_detections", "timestamp": result.timestamp})
-            self._clear_active_target()
-            return None
+            # Check if we have buffered detections to use
+            buffered_detection = self._get_buffered_detection()
+            if buffered_detection is not None:
+                logger.debug(f"Using buffered detection from {time.time() - buffered_detection[1]:.3f}s ago")
+                detection = buffered_detection[0]
+                # Use the buffered detection but mark that we're using old data
+                self._active_target = detection
+                frame = result.frame if result.frame is not None else self._get_last_frame()
+                if frame is None:
+                    self._last_axis_errors = []
+                    self._maybe_display_frame(result, None, None, None, [])
+                    self._record_status({"state": "no_frame", "timestamp": result.timestamp})
+                    self._clear_active_target()
+                    return None
+
+                height, width = frame.shape[:2]
+                bbox_center = detection.bbox.center()
+                error_x = bbox_center[0] - (width / 2.0)
+                error_y = bbox_center[1] - (height / 2.0)
+
+                axis_errors = self._compute_axis_errors(error_x, error_y, width, height)
+                self._last_axis_errors = axis_errors
+
+                display_axis_errors = axis_errors
+                self._maybe_display_frame(
+                    result,
+                    detection,
+                    error_x,
+                    error_y,
+                    display_axis_errors,
+                    None,
+                    None,
+                )
+
+                velocity_scales = {}
+                for axis_error in axis_errors:
+                    for joint_index in axis_error.joint_indices:
+                        velocity_scales[joint_index] = axis_error.velocity_scale
+
+                payload = {
+                    "timestamp": result.timestamp,
+                    "target": detection.to_dict(),
+                    "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+                    "velocity_scales": velocity_scales,
+                    "resolution_scale": {"x": 1.0, "y": 1.0},
+                    "satisfied": False,
+                    "using_buffer": True,
+                }
+                self._record_status({"state": "active_buffered", **payload})
+                return payload
+            else:
+                # No buffered detection available, stop movement
+                self._last_axis_errors = []
+                self._maybe_display_frame(result, None, None, None, [])
+                self._record_status({"state": "no_detections", "timestamp": result.timestamp})
+                self._clear_active_target()
+                return None
 
         detection = self._selector.select(result.detections)
         if detection is None:
-            self._last_axis_errors = []
-            self._maybe_display_frame(result, None, None, None, [])
-            self._record_status(
-                {
-                    "state": "no_target",
+            # Check if we have buffered detections to use
+            buffered_detection = self._get_buffered_detection()
+            if buffered_detection is not None:
+                logger.debug(f"Using buffered detection from {time.time() - buffered_detection[1]:.3f}s ago")
+                detection = buffered_detection[0]
+                # Use the buffered detection but mark that we're using old data
+                self._active_target = detection
+                frame = result.frame
+                height, width = frame.shape[:2]
+                bbox_center = detection.bbox.center()
+                error_x = bbox_center[0] - (width / 2.0)
+                error_y = bbox_center[1] - (height / 2.0)
+
+                axis_errors = self._compute_axis_errors(error_x, error_y, width, height)
+                self._last_axis_errors = axis_errors
+
+                display_axis_errors = axis_errors
+                self._maybe_display_frame(
+                    result,
+                    detection,
+                    error_x,
+                    error_y,
+                    display_axis_errors,
+                    None,
+                    None,
+                )
+
+                velocity_scales = {}
+                for axis_error in axis_errors:
+                    for joint_index in axis_error.joint_indices:
+                        velocity_scales[joint_index] = axis_error.velocity_scale
+
+                payload = {
                     "timestamp": result.timestamp,
-                    "detections": [d.to_dict() for d in result.detections],
+                    "target": detection.to_dict(),
+                    "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
+                    "velocity_scales": velocity_scales,
+                    "resolution_scale": {"x": 1.0, "y": 1.0},
+                    "satisfied": False,
+                    "using_buffer": True,
                 }
-            )
-            self._clear_active_target()
-            return None
+                self._record_status({"state": "active_buffered", **payload})
+                return payload
+            else:
+                # No buffered detection available, stop movement
+                self._last_axis_errors = []
+                self._maybe_display_frame(result, None, None, None, [])
+                self._record_status(
+                    {
+                        "state": "no_target",
+                        "timestamp": result.timestamp,
+                        "detections": [d.to_dict() for d in result.detections],
+                    }
+                )
+                self._clear_active_target()
+                return None
+
+        # Add successful detection to buffer
+        self._add_to_detection_buffer(detection, result.timestamp)
 
         self._active_target = detection
 
@@ -343,11 +453,16 @@ class ObjectCenteringStrategy:
             None,
         )
 
+        velocity_scales = {}
+        for axis_error in axis_errors:
+            for joint_index in axis_error.joint_indices:
+                velocity_scales[joint_index] = axis_error.velocity_scale
+        
         payload = {
             "timestamp": result.timestamp,
             "target": detection.to_dict(),
             "errors": {"x_pixels": float(error_x), "y_pixels": float(error_y)},
-            "velocity_scales": {axis_error.joint_index: axis_error.velocity_scale for axis_error in axis_errors},
+            "velocity_scales": velocity_scales,
             "resolution_scale": {"x": 1.0, "y": 1.0},
             "satisfied": False,
         }
@@ -373,6 +488,68 @@ class ObjectCenteringStrategy:
     def get_status(self) -> Dict[str, Any]:
         with self._lock:
             return dict(self._last_status)
+
+    def get_pid_values(self) -> Dict[str, Dict[str, float]]:
+        """Get current PID values for both axes."""
+        with self._lock:
+            return {
+                "horizontal": {
+                    "kp": self._pid_horizontal["kp"],
+                    "ki": self._pid_horizontal["ki"],
+                    "kd": self._pid_horizontal["kd"],
+                },
+                "vertical": {
+                    "kp": self._pid_vertical["kp"],
+                    "ki": self._pid_vertical["ki"],
+                    "kd": self._pid_vertical["kd"],
+                },
+            }
+
+    def set_pid_values(self, axis: str, kp: Optional[float] = None, ki: Optional[float] = None, kd: Optional[float] = None) -> None:
+        """Update PID values for the specified axis."""
+        with self._lock:
+            if axis == "horizontal":
+                pid_dict = self._pid_horizontal
+            elif axis == "vertical":
+                pid_dict = self._pid_vertical
+            else:
+                raise ValueError(f"Invalid axis: {axis}. Must be 'horizontal' or 'vertical'")
+
+            if kp is not None:
+                pid_dict["kp"] = max(0.0, float(kp))
+            if ki is not None:
+                pid_dict["ki"] = max(0.0, float(ki))
+            if kd is not None:
+                pid_dict["kd"] = max(0.0, float(kd))
+
+            logger.info(f"Updated {axis} PID: kp={pid_dict['kp']:.4f}, ki={pid_dict['ki']:.4f}, kd={pid_dict['kd']:.4f}")
+
+    # ------------------------------------------------------------------
+    # Detection buffering helpers
+    def _add_to_detection_buffer(self, detection: Detection, timestamp: float) -> None:
+        """Add a successful detection to the buffer."""
+        self._detection_buffer.append((detection, timestamp))
+        self._last_detection_time = timestamp
+
+    def _get_buffered_detection(self) -> Optional[Tuple[Detection, float]]:
+        """Get the most recent buffered detection if it's within the timeout."""
+        if not self._detection_buffer:
+            return None
+        
+        detection, timestamp = self._detection_buffer[-1]
+        time_since_detection = time.time() - timestamp
+        
+        if time_since_detection <= self._detection_timeout_s:
+            return (detection, timestamp)
+        
+        return None
+
+    def _get_last_frame(self) -> Optional[np.ndarray]:
+        """Get the last frame from the detector if available."""
+        # Try to get the last cached result from the detector
+        if hasattr(self._detector, '_last_result') and self._detector._last_result:
+            return self._detector._last_result.frame
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -421,7 +598,7 @@ class ObjectCenteringStrategy:
                 velocity_scale *= -1
             distance_factor = abs(scaled_error) / (abs(scaled_error) + 100.0)
             velocity_scale *= distance_factor
-            axis_errors.append(AxisError(error_x, velocity_scale, horizontal.joint_index))
+            axis_errors.append(AxisError(error_x, velocity_scale, horizontal.joint_indices))
             logger.debug(f"Horizontal: error_x={error_x:.1f}, scaled={scaled_error:.1f}, scale={velocity_scale:.3f}")
         if vertical:
             effective_error = -error_y if self._invert_vertical else error_y
@@ -447,7 +624,7 @@ class ObjectCenteringStrategy:
                 velocity_scale *= -1
             distance_factor = abs(scaled_error) / (abs(scaled_error) + 50.0)
             velocity_scale *= distance_factor
-            axis_errors.append(AxisError(error_y, velocity_scale, vertical.joint_index))
+            axis_errors.append(AxisError(error_y, velocity_scale, vertical.joint_indices))
             logger.info(f"Vertical: error_y={error_y:.1f}, scaled={scaled_error:.1f}, scale={velocity_scale:.3f}")
         return axis_errors
 
@@ -541,7 +718,11 @@ class ObjectCenteringStrategy:
 
     def get_current_velocity_scales(self) -> Dict[int, float]:
         with self._lock:
-            return {ae.joint_index: ae.velocity_scale for ae in self._last_axis_errors}
+            scales = {}
+            for ae in self._last_axis_errors:
+                for joint_index in ae.joint_indices:  # Iterate over all joints for this axis
+                    scales[joint_index] = ae.velocity_scale
+            return scales
 
     def _dispatch_joint_targets(self, targets: Sequence[float], duration_s: Optional[float] = None) -> None:
         duration = duration_s if duration_s is not None else self._move_duration
@@ -593,8 +774,9 @@ class ObjectCenteringStrategy:
             f"scale lat:{self._last_latency_scale:.2f} swing:{self._current_swing_scale:.2f} tot:{self._last_total_scale:.2f}"
         )
         for axis_error in axis_errors:
+            joints_str = ", ".join(f"j{ji}" for ji in axis_error.joint_indices)
             deg = math.degrees(axis_error.velocity_scale * self._dt * self._max_velocity)
-            overlay_lines.append(f"joint {axis_error.joint_index}: {deg:.2f} deg")
+            overlay_lines.append(f"{joints_str}: {deg:.2f} deg")
         if overlay_lines:
             y_offset = 20
             for line in overlay_lines[:4]:

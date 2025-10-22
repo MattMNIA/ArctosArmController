@@ -14,7 +14,7 @@ import yaml
 class AxisCalibration:
     """Pixel-to-angle conversion parameters for a single camera axis."""
 
-    joint_index: int
+    joint_indices: list[int]  # Changed from joint_index to support multiple joints
     pixels_per_degree: float
     invert: bool = False
     gain: float = 1.0
@@ -23,7 +23,7 @@ class AxisCalibration:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "joint_index": int(self.joint_index),
+            "joint_indices": [int(ji) for ji in self.joint_indices],  # Updated
             "pixels_per_degree": float(self.pixels_per_degree),
             "invert": bool(self.invert),
             "gain": float(self.gain),
@@ -33,8 +33,17 @@ class AxisCalibration:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "AxisCalibration":
+        # Support both old and new formats for backward compatibility
+        joint_indices = payload.get("joint_indices")
+        if joint_indices is None:
+            # Fallback to single joint_index for backward compatibility
+            joint_index = payload.get("joint_index", 0)
+            joint_indices = [int(joint_index)]
+        else:
+            joint_indices = [int(ji) for ji in joint_indices]
+        
         return cls(
-            joint_index=int(payload.get("joint_index", 0)),
+            joint_indices=joint_indices,
             pixels_per_degree=float(payload.get("pixels_per_degree", 1.0)),
             invert=bool(payload.get("invert", False)),
             gain=float(payload.get("gain", 1.0)),

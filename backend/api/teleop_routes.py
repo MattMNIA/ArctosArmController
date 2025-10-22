@@ -63,27 +63,63 @@ def start_mode():
     return jsonify({'state': state})
 
 
-@teleop_bp.route('/pause', methods=['POST'])
-def pause_mode():
+@teleop_bp.route('/stop', methods=['POST'])
+def stop_mode():
     manager = _get_manager()
     try:
-        state = manager.pause()
-    except TeleopManagerError as exc:
-        return jsonify({'error': str(exc)}), 400
-    except Exception as exc:
-        logger.exception("Unexpected pause failure")
-        return jsonify({'error': 'Failed to pause teleoperation mode'}), 500
-    return jsonify({'state': state})
+        manager.stop()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Unexpected teleop stop failure")
+        return jsonify({'error': 'Failed to stop teleoperation mode'}), 500
+    return jsonify({'state': manager.current_state()})
 
 
-@teleop_bp.route('/resume', methods=['POST'])
-def resume_mode():
+@teleop_bp.route('/pid', methods=['GET'])
+def get_pid_values():
+    """Get current PID values for object centering."""
     manager = _get_manager()
+    if manager._current_mode != "object-centering":
+        return jsonify({'error': 'PID tuning only available for object-centering mode'}), 400
+
+    input_controller = manager._input_controller
+    if not input_controller or not hasattr(input_controller, '_strategy'):
+        return jsonify({'error': 'No active object centering strategy'}), 400
+
     try:
-        state = manager.resume()
-    except TeleopManagerError as exc:
+        pid_values = input_controller._strategy.get_pid_values()
+        return jsonify({'pid': pid_values})
+    except Exception as exc:
+        logger.exception("Failed to get PID values")
+        return jsonify({'error': 'Failed to retrieve PID values'}), 500
+
+
+@teleop_bp.route('/pid', methods=['POST'])
+def set_pid_values():
+    """Update PID values for object centering."""
+    manager = _get_manager()
+    if manager._current_mode != "object-centering":
+        return jsonify({'error': 'PID tuning only available for object-centering mode'}), 400
+
+    input_controller = manager._input_controller
+    if not input_controller or not hasattr(input_controller, '_strategy'):
+        return jsonify({'error': 'No active object centering strategy'}), 400
+
+    payload = _json_payload()
+    axis = payload.get('axis')
+    kp = payload.get('kp')
+    ki = payload.get('ki')
+    kd = payload.get('kd')
+
+    if not axis:
+        return jsonify({'error': "Missing 'axis' in request body"}), 400
+
+    try:
+        input_controller._strategy.set_pid_values(axis, kp=kp, ki=ki, kd=kd)
+        # Return updated values
+        pid_values = input_controller._strategy.get_pid_values()
+        return jsonify({'pid': pid_values})
+    except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     except Exception as exc:
-        logger.exception("Unexpected resume failure")
-        return jsonify({'error': 'Failed to resume teleoperation mode'}), 500
-    return jsonify({'state': state})
+        logger.exception("Failed to set PID values")
+        return jsonify({'error': 'Failed to update PID values'}), 500
