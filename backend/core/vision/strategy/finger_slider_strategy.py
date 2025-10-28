@@ -240,8 +240,8 @@ class FingerSliderStrategy:
 
     def close(self) -> None:
         with self._lock:
-            if self._hands:
-                self._hands.close()
+            # if self._hands:
+            #     self._hands.close()
             if self._camera and self._camera.is_opened():
                 self._camera.release()
         if self._show_window:
