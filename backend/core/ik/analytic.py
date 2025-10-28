@@ -13,13 +13,15 @@ class AnalyticIKSolver:
     Loads the URDF and uses PyBullet's calculateInverseKinematics for accurate solutions.
     """
 
-    def __init__(self, urdf_path: str):
+    def __init__(self, urdf_path: str, gui: bool = False):
         """
         Initialize the IK solver with the URDF file.
 
         :param urdf_path: Path to the robot URDF file.
+        :param gui: If True, launch PyBullet GUI; else run headless.
         """
         self.urdf_path = urdf_path
+        self.gui = gui
         self.physics_client: Optional[int] = None
         self.robot_id: Optional[int] = None
         self.end_effector_link_index: Optional[int] = None
@@ -27,9 +29,12 @@ class AnalyticIKSolver:
         self._initialize_pybullet()
 
     def _initialize_pybullet(self):
-        """Initialize PyBullet in DIRECT mode for IK computation."""
+        """Initialize PyBullet in DIRECT or GUI mode for IK computation."""
         try:
-            self.physics_client = p.connect(p.DIRECT)
+            if self.gui:
+                self.physics_client = p.connect(p.GUI)
+            else:
+                self.physics_client = p.connect(p.DIRECT)
             p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
             # Load the robot

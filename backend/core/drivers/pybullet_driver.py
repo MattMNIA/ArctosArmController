@@ -17,21 +17,25 @@ class PyBulletDriver:
     Implements the same interface as other Drivers (SimDriver, CanDriver).
     """
 
-    def __init__(self, urdf_path: str, gui: bool = True):
+    def __init__(self, urdf_path: str, gui: bool = True, shared_physics_client: Optional[int] = None, shared_robot_id: Optional[int] = None, shared_joint_indices: Optional[List[int]] = None):
         """
         :param urdf_path: Path to the robot URDF file.
         :param gui: If True, launches PyBullet GUI; else runs headless.
+        :param shared_physics_client: Optional shared PyBullet physics client.
+        :param shared_robot_id: Optional shared robot ID.
+        :param shared_joint_indices: Optional shared joint indices.
         """
         self.urdf_path = urdf_path
         self.gui = gui
-        self.physics_client: Optional[int] = None
-        self.robot_id: Optional[int] = None
+        self.physics_client: Optional[int] = shared_physics_client
+        self.robot_id: Optional[int] = shared_robot_id
         self.num_joints: int = 0
-        self.joint_indices: List[int] = []
+        self.joint_indices: List[int] = shared_joint_indices or []
         self.time_step = 1.0 / 240.0  # default PyBullet timestep
         self.default_speed_rpm = 200.0
         self.config_manager: Optional[ConfigManager] = None
         self._motor_speed_limits: List[Optional[float]] = []
+        self._shared = shared_physics_client is not None
         self._load_speed_configuration()
         logger.info("PyBulletDriver created with URDF: %s, GUI: %s", urdf_path, gui)
         
@@ -41,6 +45,12 @@ class PyBulletDriver:
 
 
     def connect(self):
+        if self._shared:
+            # Already connected via shared client
+            self.num_joints = len(self.joint_indices)
+            print(f"[PyBulletDriver] Using shared PyBullet instance with {self.num_joints} joints.")
+            return
+
         if self.gui:
             self.physics_client = p.connect(p.GUI)
         else:
@@ -73,7 +83,7 @@ class PyBulletDriver:
         print("[PyBulletDriver] Enabled simulation")
 
     def disable(self):
-        if self.physics_client is not None:
+        if not self._shared and self.physics_client is not None:
             try:
                 p.disconnect(self.physics_client)
                 print("[PyBulletDriver] Simulation stopped")

@@ -53,13 +53,38 @@ def create_app(drivers_list):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Initialize IK Solver first (always present)
+    ik_solver = None
+    gui = 'pybullet' in drivers_list
+    try:
+        ik_solver = AnalyticIKSolver(r"backend\models\urdf\arctos_urdf.urdf", gui=gui)
+        app.config['ik_solver'] = ik_solver
+        print("IK solver initialized successfully")
+    except ImportError as e:
+        print(f"Warning: IK solver not available (PyBullet not installed): {e}")
+        print("IK functionality will be disabled")
+        app.config['ik_solver'] = None
+    except Exception as e:
+        print(f"Warning: Failed to initialize IK solver: {e}")
+        print("IK functionality will be disabled")
+        app.config['ik_solver'] = None
+    
     # Initialize Drivers
     drivers = []
     if 'sim' in drivers_list:
         sim_driver = SimDriver()
         drivers.append(sim_driver)
     if 'pybullet' in drivers_list:
-        pybullet_driver = PyBulletDriver(gui=True, urdf_path=r"backend\models\urdf\arctos_urdf.urdf")
+        shared_client = ik_solver.physics_client if ik_solver else None
+        shared_robot_id = ik_solver.robot_id if ik_solver else None
+        shared_joint_indices = ik_solver.joint_indices if ik_solver else None
+        pybullet_driver = PyBulletDriver(
+            gui=True, 
+            urdf_path=r"backend\models\urdf\arctos_urdf.urdf",
+            shared_physics_client=shared_client,
+            shared_robot_id=shared_robot_id,
+            shared_joint_indices=shared_joint_indices
+        )
         drivers.append(pybullet_driver)
     if 'can' in drivers_list:
         can_driver = CanDriver()
@@ -82,20 +107,6 @@ def create_app(drivers_list):
     motion_service.has_active_connections = has_active_connections
     app.config['motion_service'] = motion_service
     app.config['teleop_manager'] = TeleopManager(motion_service)
-
-    # Initialize IK Solver
-    try:
-        ik_solver = AnalyticIKSolver(r"backend\models\urdf\arctos_urdf.urdf")
-        app.config['ik_solver'] = ik_solver
-        print("IK solver initialized successfully")
-    except ImportError as e:
-        print(f"Warning: IK solver not available (PyBullet not installed): {e}")
-        print("IK functionality will be disabled")
-        app.config['ik_solver'] = None
-    except Exception as e:
-        print(f"Warning: Failed to initialize IK solver: {e}")
-        print("IK functionality will be disabled")
-        app.config['ik_solver'] = None
 
     # Register blueprints
     app.register_blueprint(ik_bp, url_prefix='/api/ik')

@@ -92,12 +92,17 @@ class MotionService:
     Manages motion commands via a queue and executes them in a separate thread.
     Ensures thread-safe operation and proper state management.
     """
-    def __init__(self, driver=None, loop_hz: int = 50):
+    def __init__(self, driver=None, control_loop_hz: int = 200, status_loop_hz: int = 20, loop_hz: Optional[int] = None):
+        # Backward compatibility: if loop_hz is provided, use it for control_loop_hz
+        if loop_hz is not None:
+            control_loop_hz = loop_hz
         self.driver = driver or SimDriver()
-        self.loop_hz = loop_hz  
+        self.control_loop_hz = control_loop_hz
+        self.status_loop_hz = status_loop_hz
         self.command_queue: "queue.Queue[Command]" = queue.Queue()
         self.running = False
-        self.thread: Optional[threading.Thread] = None
+        self.control_thread: Optional[threading.Thread] = None
+        self.status_thread: Optional[threading.Thread] = None
         self._shutdown_event = threading.Event()
         
         # Use separate locks for different data
@@ -154,8 +159,10 @@ class MotionService:
         try:
             self.driver.connect()
             self.driver.enable()
-            self.thread = threading.Thread(target=self._loop, daemon=True)
-            self.thread.start()
+            self.control_thread = threading.Thread(target=self._control_loop, daemon=True)
+            self.control_thread.start()
+            self.status_thread = threading.Thread(target=self._status_loop, daemon=True)
+            self.status_thread.start()
         except Exception as e:
             logger.error(f"Failed to start motion service: {e}")
             with self._state_lock:
@@ -175,15 +182,23 @@ class MotionService:
             self._paused = False  # Reset paused on stop
         
         # Wait for thread and cleanup outside of lock
-        loop_thread = self.thread
+        control_thread = self.control_thread
+        status_thread = self.status_thread
         still_running = False
-        if loop_thread:
-            loop_thread.join(timeout=5.0)
-            still_running = loop_thread.is_alive()
+        if control_thread:
+            control_thread.join(timeout=5.0)
+            still_running = control_thread.is_alive()
             if still_running:
-                logger.warning("MotionService loop thread did not exit within timeout")
-            elif self.thread is loop_thread:
-                self.thread = None
+                logger.warning("MotionService control thread did not exit within timeout")
+            elif self.control_thread is control_thread:
+                self.control_thread = None
+        if status_thread:
+            status_thread.join(timeout=5.0)
+            still_running = status_thread.is_alive()
+            if still_running:
+                logger.warning("MotionService status thread did not exit within timeout")
+            elif self.status_thread is status_thread:
+                self.status_thread = None
 
         if not self._shutdown_event.wait(timeout=2.0):
             if still_running:
@@ -247,9 +262,9 @@ class MotionService:
         if cancelled_count > 0:
             logger.info(f"Cancelled {cancelled_count} pending gripper commands")
 
-    def _loop(self):
-        """Main execution loop."""
-        dt = 1.0 / self.loop_hz
+    def _control_loop(self):
+        """Main control execution loop at high frequency."""
+        dt = 1.0 / self.control_loop_hz
         try:
             while self.running:
                 try:
@@ -266,12 +281,27 @@ class MotionService:
                         except queue.Empty:
                             pass
                     
+                except Exception as e:
+                    logger.error(f"Error in motion service control loop: {e}")
+                    self.current_state = "ERROR"
+                
+                time.sleep(dt)
+        finally:
+            # Note: Driver disable is handled in status thread or stop method
+            self._shutdown_event.set()
+
+    def _status_loop(self):
+        """Status loop execution."""
+        dt = 1.0 / self.status_loop_hz
+        try:
+            while self.running:
+                try:
                     # Always emit telemetry (outside locks)
                     feedback = self.driver.get_feedback()
                     self._handle_feedback(feedback)
                     
                 except Exception as e:
-                    logger.error(f"Error in motion service loop: {e}")
+                    logger.error(f"Error in motion service status loop: {e}")
                     self.current_state = "ERROR"
                 
                 time.sleep(dt)

@@ -273,12 +273,7 @@ class CanDriver():
 
         motor_velocities: Dict[int, float] = {}
         for i in range(6):
-            if i == 1:
-                # Joint 1: coupled to motors 1 and 2 (add coupling - same direction)
-                q1_dot = joint_velocities[1] if 1 < num_joints else 0.0
-                motor_velocities[1] = q1_dot
-                motor_velocities[2] = q1_dot
-            elif i < 4:
+            if i < 4:
                 motor_velocities[i] = joint_velocities[i] if i < num_joints else 0.0
             else:
                 q4_dot = joint_velocities[4] if 4 < num_joints else 0.0
