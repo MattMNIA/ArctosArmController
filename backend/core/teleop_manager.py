@@ -64,6 +64,11 @@ class TeleopManager:
                     "default": "object",
                     "options": ["object", "face"],
                 },
+                "gestureConfigPath": {
+                    "type": "string",
+                    "label": "Gesture config path",
+                    "placeholder": "backend/core/vision/detectors/gesture/gestures.yml",
+                },
                 "displayFeed": {
                     "type": "boolean",
                     "label": "Show annotated feed",
@@ -220,6 +225,7 @@ class TeleopManager:
             detector_type = options.get("detectorType", "object")
             invert_horizontal = bool(options.get("invertHorizontal", False))
             invert_vertical = bool(options.get("invertVertical", False))
+            gesture_config_path = options.get("gestureConfigPath")
             return ObjectCenteringInput(
                 motion_service=self._motion_service,
                 driver=self._driver,
@@ -230,6 +236,7 @@ class TeleopManager:
                 display_feed=display_feed,
                 invert_horizontal=invert_horizontal,
                 invert_vertical=invert_vertical,
+                gesture_config_path=gesture_config_path,
             )
         raise TeleopManagerError(f"Unsupported teleoperation mode '{mode}'")
 

@@ -38,6 +38,8 @@ class ObjectCenteringInput(InputController):
         display_window_name: Optional[str] = None,
         invert_horizontal: bool = False,
         invert_vertical: bool = False,
+        enable_gestures: bool = True,
+        gesture_config_path: Optional[Union[str, Path]] = None,
     ) -> None:
         if motion_service is None and driver is None:
             raise ValueError("ObjectCenteringInput requires either a motion_service or driver instance")
@@ -77,6 +79,8 @@ class ObjectCenteringInput(InputController):
             display_window_name=display_window_name,
             invert_horizontal=invert_horizontal,
             invert_vertical=invert_vertical,
+            enable_gestures=enable_gestures,
+            gesture_config_path=gesture_config_path,
         )
         self._strategy.start(poll_interval=0.05)
         self._previous_scales: Dict[int, float] = {}

@@ -16,6 +16,11 @@ try:
 except ImportError:  # pragma: no cover - optional dependency for visualization
     cv2 = None  # type: ignore[assignment]
 
+try:  # Optional dependencies for gesture recognition
+    import mediapipe as mp
+except ImportError:  # pragma: no cover - optional dependency for gesture recognition
+    mp = None  # type: ignore[assignment]
+
 import numpy as np
 
 from ..calibration.object_centering import (
@@ -25,6 +30,7 @@ from ..calibration.object_centering import (
     load_calibration,
 )
 from ..detectors.base_detector import BaseDetector, Detection, DetectionResult
+from ..detectors.gesture.gesture_recognizer import GestureRecognizer
 from ...motion_service import JointCommand, MotionService
 
 logger = logging.getLogger(__name__)
@@ -173,6 +179,8 @@ class ObjectCenteringStrategy:
         max_velocity: float = 1.0,
         detection_buffer_frames: int = 3,
         detection_timeout_s: float = 0.5,
+        enable_gestures: bool = True,
+        gesture_config_path: Optional[Path | str] = None,
     ) -> None:
         if calibration is None:
             candidate_path = Path(calibration_path) if calibration_path is not None else DEFAULT_CALIBRATION_PATH
@@ -269,12 +277,37 @@ class ObjectCenteringStrategy:
         self._display_window_name = display_window_name or "Object Centering"
         self._display_initialized = False
 
+        # Gesture recognition setup
+        self._enable_gestures = bool(enable_gestures) and mp is not None
+        if self._enable_gestures and mp is None:
+            logger.warning("enable_gestures requested but mediapipe is not available; disabling gestures")
+            self._enable_gestures = False
+        self._gesture_recognizer: Optional[GestureRecognizer] = None
+        self._hands: Optional[Any] = None
+        if self._enable_gestures and mp is not None:
+            try:
+                self._gesture_recognizer = GestureRecognizer(config_path=gesture_config_path, model="mlp")
+                self._hands = mp.solutions.hands.Hands(
+                    static_image_mode=False,
+                    max_num_hands=2,
+                    min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5,
+                )
+                logger.info(f"Gesture recognition enabled (classifier loaded: {self._gesture_recognizer.enabled})")
+            except Exception as exc:
+                logger.warning("Failed to initialize gesture recognition: %s", exc)
+                self._enable_gestures = False
+        self._paused = False
+
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._worker: Optional[threading.Thread] = None
         self._last_command_time = 0.0
         self._last_status: Dict[str, Any] = {}
         self._last_axis_errors: List[AxisError] = []
+        self._last_gesture_overlays: List[str] = []
+        self._last_hand_landmarks: Optional[List[Any]] = None
+        self._last_handedness: Optional[List[str]] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -291,6 +324,7 @@ class ObjectCenteringStrategy:
         )
         self._worker.start()
         self._detector.start(poll_interval=poll_interval)
+        logger.info(f"Object centering strategy started (gestures {'enabled' if self._enable_gestures else 'disabled'})")
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -298,6 +332,7 @@ class ObjectCenteringStrategy:
         if self._worker:
             self._worker.join(timeout=1.0)
         self._worker = None
+        logger.info("Object centering strategy stopped")
         self._close_display_window()
 
     def step(self) -> Optional[Dict[str, Any]]:
@@ -309,6 +344,19 @@ class ObjectCenteringStrategy:
 
         latency = time.time() - result.timestamp
         logger.debug(f"Object centering latency: {latency:.3f}s")
+
+        # Process gestures if enabled
+        if self._enable_gestures and result.frame is not None and self._hands is not None and self._gesture_recognizer is not None:
+            self._process_gestures(result.frame)
+        elif self._enable_gestures:
+            logger.debug("Gesture processing skipped: missing frame or uninitialized components")
+
+        # If paused, skip centering logic
+        if self._paused:
+            self._last_axis_errors = []
+            self._maybe_display_frame(result, None, None, None, [])
+            self._record_status({"state": "paused", "timestamp": result.timestamp})
+            return {"state": "paused", "timestamp": result.timestamp}
 
         if result.frame is None or not result.detections:
             # Check if we have buffered detections to use
@@ -487,7 +535,15 @@ class ObjectCenteringStrategy:
 
     def get_status(self) -> Dict[str, Any]:
         with self._lock:
-            return dict(self._last_status)
+            status = dict(self._last_status)
+            status.update({
+                "gestures": {
+                    "enabled": self._enable_gestures,
+                    "paused": self._paused,
+                    "available": self._hands is not None and self._gesture_recognizer is not None,
+                }
+            })
+            return status
 
     def get_pid_values(self) -> Dict[str, Dict[str, float]]:
         """Get current PID values for both axes."""
@@ -779,6 +835,23 @@ class ObjectCenteringStrategy:
             joints_str = ", ".join(f"j{ji}" for ji in axis_error.joint_indices)
             deg = math.degrees(axis_error.velocity_scale * self._dt * self._max_velocity)
             overlay_lines.append(f"{joints_str}: {deg:.2f} deg")
+        
+        # Add gesture information
+        with self._lock:
+            gesture_status = "GESTURES:"
+            if self._last_gesture_overlays:
+                overlay_lines.append(gesture_status)
+                overlay_lines.extend(self._last_gesture_overlays[:3])  # Limit to 3 gesture lines
+            elif self._enable_gestures:
+                overlay_lines.append("GESTURES: No hands detected")
+            else:
+                overlay_lines.append("GESTURES: Disabled")
+                
+            if self._paused:
+                overlay_lines.append("STATUS: PAUSED (by gesture)")
+            else:
+                overlay_lines.append("STATUS: ACTIVE")
+        
         if overlay_lines:
             y_offset = 20
             for line in overlay_lines[:4]:
@@ -802,6 +875,34 @@ class ObjectCenteringStrategy:
                 self._display_feed = False
                 return
             self._display_initialized = True
+
+        # Draw hand landmarks and gesture predictions
+        with self._lock:
+            if self._last_hand_landmarks and self._last_handedness and mp is not None:
+                try:
+                    # Draw hand landmarks
+                    for hand_landmarks, handedness in zip(self._last_hand_landmarks, self._last_handedness):
+                        if hasattr(hand_landmarks, "landmark"):
+                            mp.solutions.drawing_utils.draw_landmarks(
+                                annotated, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS
+                            )
+                    
+                    # Draw gesture predictions as text overlays on hands
+                    y_offset = height - 100
+                    for i, overlay in enumerate(self._last_gesture_overlays[:2]):  # Show top 2 predictions
+                        cv2.putText(
+                            annotated,
+                            overlay,
+                            (10, y_offset - i * 25),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,
+                            (255, 255, 0),
+                            2,
+                            cv2.LINE_AA,
+                        )
+                except Exception as e:
+                    logger.debug(f"Failed to draw hand landmarks: {e}")
+
         cv2.imshow(self._display_window_name, annotated)
         key = cv2.waitKey(1) & 0xFF
         if key in (27, ord("q")):
@@ -914,6 +1015,63 @@ class ObjectCenteringStrategy:
             return 1.0
         scale = 1.0 / (1.0 + (max(0.0, latency_seconds) * self._latency_slowdown))
         return max(0.1, min(1.0, scale))
+
+    def _process_gestures(self, frame: np.ndarray) -> None:
+        """Process gestures from the frame and handle actions."""
+        if self._hands is None or self._gesture_recognizer is None:
+            logger.debug("Gesture recognition not available (hands or recognizer not initialized)")
+            return
+
+        if not self._gesture_recognizer.enabled:
+            logger.debug("Gesture recognizer not enabled (no classifier loaded)")
+            return
+
+        # Convert BGR to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if cv2 is not None else frame
+        results = self._hands.process(rgb_frame)
+
+        if not results.multi_hand_landmarks or not results.multi_handedness:
+            logger.debug("No hands detected in frame")
+            # Clear stored hand data
+            with self._lock:
+                self._last_hand_landmarks = None
+                self._last_handedness = None
+                self._last_gesture_overlays = []
+            return
+
+        hand_landmarks = results.multi_hand_landmarks
+        handedness_list = results.multi_handedness
+        handedness_labels = [h.classification[0].label for h in results.multi_handedness]
+        logger.debug(f"Detected {len(hand_landmarks)} hands: {handedness_labels}")
+
+        # Store hand data for display
+        with self._lock:
+            self._last_hand_landmarks = hand_landmarks
+            self._last_handedness = handedness_labels
+
+        events, overlays = self._gesture_recognizer.process(hand_landmarks, handedness_list)
+
+        logger.debug(f"Gesture processing result: {len(events)} events, overlays: {overlays}")
+
+        # Store overlays for display
+        with self._lock:
+            self._last_gesture_overlays = overlays
+
+        if overlays:
+            logger.info(f"Gesture predictions: {overlays}")
+
+        for event in events:
+            logger.info(f"Gesture event: {event.change} {event.event} (label: {event.label}, confidence: {event.confidence:.2f})")
+            if event.change == "start":  # Only handle start events to avoid repeated actions
+                if event.event == "teleop_pause":
+                    self._paused = True
+                    logger.info("Object centering paused by gesture (thumbs down)")
+                elif event.event == "teleop_resume":
+                    self._paused = False
+                    logger.info("Object centering resumed by gesture (thumbs up)")
+                elif event.event == "zero_all_joints":
+                    self._dispatch_joint_targets([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], duration_s=2.0)
+                    logger.info("Moving to zero pose by gesture (rock and roll)")
 
 
 __all__ = ["ObjectCenteringStrategy", "TargetSelector", "ArmDriverProtocol"]

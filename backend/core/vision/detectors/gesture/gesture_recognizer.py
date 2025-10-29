@@ -352,6 +352,9 @@ class GestureRecognizer:
         classifier: Optional[BaseGestureClassifier]
         try:
             classifier = MLGestureClassifier(model_path)
+            logger.info("Gesture classifier loaded successfully from %s", model_path)
+            if classifier and hasattr(classifier, '_label_encoder'):
+                logger.info("Gesture classes: %s", list(classifier._label_encoder.classes_))
         except (ImportError, FileNotFoundError) as exc:
             classifier = None
             logger.warning(
@@ -467,13 +470,18 @@ class GestureRecognizer:
             if features is None:
                 predicted_label = None
                 confidence = 0.0
+                logger.debug("Failed to extract features for hand %s", label)
             else:
+                logger.debug("Extracted %d features for hand %s", len(features), label)
                 raw_label, raw_confidence = self._classifier.predict(features)
+                logger.debug("Raw prediction for hand %s: %s (confidence: %.3f)", label, raw_label, raw_confidence)
                 if raw_label is None or raw_confidence < self._probability_threshold:
                     predicted_label = None
                     confidence = raw_confidence
+                    logger.debug("Prediction rejected for hand %s: confidence %.3f < threshold %.3f", label, raw_confidence, self._probability_threshold)
                 else:
                     predicted_label, confidence = raw_label, raw_confidence
+                    logger.debug("Accepted prediction for hand %s: %s (confidence: %.3f)", label, predicted_label, confidence)
 
             smoothed_label, smoothed_confidence = self._update_hand_history(
                 label, predicted_label, confidence
@@ -503,12 +511,16 @@ class GestureRecognizer:
         recent_scores = list(scores)[-self._smoothing_window :]
         counts = Counter(lbl for lbl in recent_labels if lbl)
         if not counts:
+            logger.debug("No valid labels in smoothing window for hand %s", hand_label)
             return None, 0.0
         best_label, best_count = counts.most_common(1)[0]
+        logger.debug("Smoothing for hand %s: best_label=%s, count=%d/%d", hand_label, best_label, best_count, self._smoothing_window)
         if best_count < self._min_consensus:
+            logger.debug("Smoothing rejected for hand %s: %d < %d min_consensus", hand_label, best_count, self._min_consensus)
             return None, 0.0
         relevant_scores = [
             score for lbl, score in zip(recent_labels, recent_scores) if lbl == best_label
         ]
         avg_score = sum(relevant_scores) / len(relevant_scores) if relevant_scores else 0.0
+        logger.debug("Smoothed prediction for hand %s: %s (avg_confidence: %.3f)", hand_label, best_label, avg_score)
         return best_label, avg_score

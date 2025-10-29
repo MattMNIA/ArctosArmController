@@ -1,9 +1,9 @@
 # Gesture recognition configuration for finger teleoperation
 model:
   path: models/gesture_classifier.joblib
-  probability_threshold: 0.82
-  smoothing_window: 7
-  min_consensus: 5
+  probability_threshold: 0.5
+  smoothing_window: 3
+  min_consensus: 2
   max_history: 21
 
 # Each gesture maps a classifier label to a teleoperation event.
@@ -11,17 +11,15 @@ gestures:
   - label: rock_and_roll
     event: zero_all_joints
     hands_required: 1
-    hold_frames: 8
+    hold_frames: 3
     overlay: "Rock & Roll ➜ Zero"
   - label: thumbs_down
     event: teleop_pause
-    hands_required: 2
-    hold_frames: 8
-    allowed_hands: [Left, Right]
-    overlay: "Thumbs Down (Both) ➜ Pause"
+    hands_required: 1
+    hold_frames: 3
+    overlay: "Thumbs Down (1 hand) ➜ Pause"
   - label: thumbs_up
     event: teleop_resume
-    hands_required: 2
-    hold_frames: 8
-    allowed_hands: [Left, Right]
-    overlay: "Thumbs Up (Both) ➜ Resume"
+    hands_required: 1
+    hold_frames: 3
+    overlay: "Thumbs Up (1 hand) ➜ Resume"
