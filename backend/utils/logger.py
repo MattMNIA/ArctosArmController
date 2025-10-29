@@ -27,7 +27,7 @@ component_levels = {
     'api': logging.DEBUG,
     'api.config_routes': logging.INFO,
     'core.drivers.can_driver': logging.ERROR,
-    'core.vision.strategy.object_centering_strategy': logging.DEBUG,
+    'core.vision.strategy.object_centering_strategy': logging.INFO,
     'core.motion_service': logging.DEBUG, 
     'core.drivers.mks_servo_can.mks_servo': logging.INFO,
     'backend.core.drivers.mks_servo_can.mks_servo': logging.INFO,
