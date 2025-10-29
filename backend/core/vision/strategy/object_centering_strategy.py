@@ -904,11 +904,22 @@ class ObjectCenteringStrategy:
                     logger.debug(f"Failed to draw hand landmarks: {e}")
 
         cv2.imshow(self._display_window_name, annotated)
-        key = cv2.waitKey(1) & 0xFF
-        if key in (27, ord("q")):
-            logger.info("Vision preview disabled by user input")
-            self._display_feed = False
-            self._close_display_window()
+        # Only process window events every 10 frames to reduce blocking
+        if not hasattr(self, '_frame_count'):
+            self._frame_count = 0
+        self._frame_count += 1
+        if self._frame_count % 10 == 0:  # Process events every 10th frame
+            key = cv2.waitKey(1) & 0xFF
+            if key in (27, ord("q")):
+                logger.info("Vision preview disabled by user input")
+                self._display_feed = False
+                self._close_display_window()
+        else:
+            # Check if window still exists without blocking
+            if cv2.getWindowProperty(self._display_window_name, cv2.WND_PROP_VISIBLE) < 1:
+                logger.info("Vision preview window closed by user")
+                self._display_feed = False
+                self._close_display_window()
 
     def _resolve_driver(self) -> ArmDriverProtocol:
         if not self._use_motion_queue and self._driver is not None:

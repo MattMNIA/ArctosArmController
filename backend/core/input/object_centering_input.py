@@ -60,7 +60,7 @@ class ObjectCenteringInput(InputController):
             if detector_model is not None:
                 detector_args.setdefault("model", str(detector_model))
             detector_args.setdefault("confidence_threshold", float(min_confidence))
-            detector_args.setdefault("imgsz", 416)  # Increased from 256 for better accuracy
+            detector_args.setdefault("imgsz", 416) 
             detector_args.setdefault("max_frame_size", (854, 480))  # HD aspect ratio
             self._detector = ObjectDetector(self._camera_manager, **detector_args)
         else:
