@@ -26,7 +26,7 @@ def setup_logging(level=logging.DEBUG, component_levels=None):
 component_levels = {
     'api': logging.DEBUG,
     'api.config_routes': logging.INFO,
-    'core.drivers.can_driver': logging.ERROR,
+    'core.drivers.can_driver': logging.INFO,
     'core.vision.strategy.object_centering_strategy': logging.INFO,
     'core.motion_service': logging.DEBUG, 
     'core.drivers.mks_servo_can.mks_servo': logging.INFO,

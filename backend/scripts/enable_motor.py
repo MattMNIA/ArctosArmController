@@ -19,7 +19,7 @@ def main():
     # CAN bus configuration
     can_interface = "COM4"
     bitrate = 500000
-    motor_id = 5
+    motor_id = 2
 
     bus = None
     notifier = None

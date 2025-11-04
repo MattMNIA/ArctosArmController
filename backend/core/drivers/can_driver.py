@@ -1111,37 +1111,30 @@ class CanDriver():
 
     def open_gripper(self) -> None: 
         """
-        Opens the gripper with default force.
-
-        Raises:
-            Exception: If there is an issue sending the open gripper command.
-
+        Opens the gripper to the 'open' byte in the new range (0xAD - 0x40).
         """
         try:
-            self.send_can_message_gripper(0x07, [0xFF])
-            logger.info("Gripper opened with default force.")
+            OPEN_BYTE = 0x77
+            self.send_can_message_gripper(0x07, [OPEN_BYTE])
+            logger.info(f"Gripper opened (byte 0x{OPEN_BYTE:02X}).")
         except Exception as e:
             logger.error(f"Error sending open gripper command: {e}")
         
 
     def close_gripper(self) -> None: 
         """
-        Closes the gripper with default force.
-
-        Raises:
-            Exception: If there is an issue sending the close gripper command.
-
+        Closes the gripper to the 'closed' byte in the new range (0xAD - 0x40).
         """
         try:
-            self.send_can_message_gripper(0x07, [0x00])
-            logger.info("Gripper closed with default force.")
-
+            CLOSED_BYTE = 0x36
+            self.send_can_message_gripper(0x07, [CLOSED_BYTE])
+            logger.info(f"Gripper closed (byte 0x{CLOSED_BYTE:02X}).")
         except Exception as e:
             logger.error(f"Error sending close gripper command: {e}")
 
     def set_gripper_position(self, position: float) -> None: 
         """
-        Set gripper to specific opening width with default force.
+        Set gripper to specific opening width using the new byte range 0xAD (closed) -> 0x40 (open).
 
         Args:
             position (float): Position (0.0 = closed, 1.0 = open)
@@ -1149,10 +1142,21 @@ class CanDriver():
         try:
             # Clamp position to valid range
             clamped_position = max(0.0, min(1.0, position))
-            # Map 0.0-1.0 to 0x00-0xFF
-            data_value = int(clamped_position * 255)
+
+            # Define byte range: CLOSED = 0x77, OPEN = 0x36
+            OPEN_BYTE = 0x77
+            CLOSED_BYTE = 0x36
+
+            # Map 0.0 (closed) -> CLOSED_BYTE, 1.0 (open) -> OPEN_BYTE
+            # Because CLOSED_BYTE > OPEN_BYTE, we interpolate decreasingly.
+            byte_range = OPEN_BYTE - CLOSED_BYTE
+            data_value = int(round(OPEN_BYTE - clamped_position * byte_range))
+
+            # Ensure within 0-255
+            data_value = max(0, min(255, data_value))
+
             self.send_can_message_gripper(0x07, [data_value])
-            logger.info(f"Gripper set to position {clamped_position} with default force.")
+            logger.info(f"Gripper set to position {clamped_position:.3f} -> byte 0x{data_value:02X}.")
         except Exception as e:
             logger.error(f"Error sending set gripper position command: {e}")
 

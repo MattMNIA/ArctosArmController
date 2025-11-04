@@ -118,7 +118,7 @@ export default function ArmDashboard() {
 
   const openGripper = async () => {
     try {
-      await fetch("http://localhost:5000/api/execute/gripper", {
+      await fetch("http://localhost:5000/api/execute/set_gripper_position", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ position: 0.0 })
@@ -130,7 +130,7 @@ export default function ArmDashboard() {
 
   const closeGripper = async () => {
     try {
-      await fetch("http://localhost:5000/api/execute/gripper", {
+      await fetch("http://localhost:5000/api/execute/set_gripper_position", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ position: 1.0 })
@@ -142,8 +142,9 @@ export default function ArmDashboard() {
 
   const setGripperPosition = async () => {
     try {
-      const position = parseFloat(gripperInput) || 0.5;
-      await fetch("http://localhost:5000/api/execute/gripper", {
+      const parsed = parseFloat(gripperInput);
+      const position = isNaN(parsed) ? 0.5 : parsed;
+      await fetch("http://localhost:5000/api/execute/set_gripper_position", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ position })

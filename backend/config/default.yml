@@ -20,7 +20,7 @@ can_driver:
     offset_speed: 100
     endstop_level: High
   - id: 1
-    speed_rpm: 600
+    speed_rpm: 200
     acceleration: 70
     direction: CW
     homing_offset: -236000

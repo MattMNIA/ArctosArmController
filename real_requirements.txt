@@ -11,4 +11,5 @@ pandas
 scikit-learn
 joblib
 pillow 
+apriltag
 ultralytics
