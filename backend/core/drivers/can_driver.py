@@ -738,24 +738,44 @@ class CanDriver():
             if homing_offset != 0:
                 offset_speed = abs(motor_config.get("offset_speed", 50))
                 logger.info(f"Applying homing offset {homing_offset} to joint {joint_idx}")
+
+                # Read encoder before move to track progress
+                encoder_before_offset = servo.read_encoder_value_addition()
+                logger.info(f"Joint {joint_idx}: encoder before offset: {encoder_before_offset}")
+
                 servo.run_motor_relative_motion_by_axis(offset_speed, 150, int(homing_offset))
 
-                # Wait for motor to start moving
-                time.sleep(0.1)
-                start_timeout = 2.0
+                # Wait for motion to complete by monitoring encoder position
+                # The motion is complete when encoder has moved close to target and stabilized
+                target_encoder = encoder_before_offset + homing_offset
+                max_wait_time = 30.0  # Maximum wait time
+                stable_count = 0
+                stable_threshold = 5  # Number of consecutive stable readings needed
+                last_encoder = encoder_before_offset
                 start_time = time.time()
-                while not servo.is_motor_running() and (time.time() - start_time) < start_timeout:
-                    time.sleep(0.01)
 
-                if servo.is_motor_running():
-                    logger.info(f"Joint {joint_idx}: offset motion started")
+                time.sleep(0.2)  # Initial delay to let motion start
+
+                while (time.time() - start_time) < max_wait_time:
+                    current_encoder = servo.read_encoder_value_addition()
+
+                    # Check if encoder is stable (not changing)
+                    if current_encoder is not None and last_encoder is not None:
+                        if abs(current_encoder - last_encoder) < 50:  # Tolerance for "stable"
+                            stable_count += 1
+                        else:
+                            stable_count = 0  # Reset if still moving
+
+                    last_encoder = current_encoder
+
+                    # Motion complete when stable for several readings
+                    if stable_count >= stable_threshold:
+                        logger.info(f"Joint {joint_idx}: offset motion completed, encoder stable at {current_encoder}")
+                        break
+
+                    time.sleep(0.1)
                 else:
-                    logger.warning(f"Joint {joint_idx}: motor did not start moving for offset")
-
-                # Wait for motor to finish moving
-                while servo.is_motor_running():
-                    time.sleep(0.05)
-                logger.info(f"Joint {joint_idx}: offset motion completed")
+                    logger.warning(f"Joint {joint_idx}: timeout waiting for offset motion to complete")
 
             # Set current position as zero (after offset is applied)
             time.sleep(0.3)  # Ensure motor is fully settled before setting zero
@@ -881,25 +901,49 @@ class CanDriver():
         # Phase 2: Move both motors by motor 5's offset amount
         if offset5 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
+
+            # Read encoders before move to track progress
+            encoder5_before_offset = servo5.read_encoder_value_addition()
+            encoder6_before_offset = servo6.read_encoder_value_addition()
+            logger.info(f"Motor 5 encoder before offset: {encoder5_before_offset}")
+            logger.info(f"Motor 6 encoder before offset: {encoder6_before_offset}")
+
             servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
             servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
 
-            # Wait for motors to start moving
-            time.sleep(0.1)
-            start_timeout = 2.0
+            # Wait for motion to complete by monitoring encoder positions
+            max_wait_time = 30.0
+            stable_count = 0
+            stable_threshold = 5
+            last_encoder5 = encoder5_before_offset
+            last_encoder6 = encoder6_before_offset
             start_time = time.time()
-            while not (servo5.is_motor_running() or servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
-                time.sleep(0.01)
 
-            if servo5.is_motor_running() or servo6.is_motor_running():
-                logger.info("Motors 5 and 6: offset motion started")
+            time.sleep(0.2)  # Initial delay to let motion start
+
+            while (time.time() - start_time) < max_wait_time:
+                current_encoder5 = servo5.read_encoder_value_addition()
+                current_encoder6 = servo6.read_encoder_value_addition()
+
+                # Check if both encoders are stable
+                stable5 = current_encoder5 is not None and last_encoder5 is not None and abs(current_encoder5 - last_encoder5) < 50
+                stable6 = current_encoder6 is not None and last_encoder6 is not None and abs(current_encoder6 - last_encoder6) < 50
+
+                if stable5 and stable6:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+
+                last_encoder5 = current_encoder5
+                last_encoder6 = current_encoder6
+
+                if stable_count >= stable_threshold:
+                    logger.info(f"Motors 5 and 6: offset motion completed, encoders stable at {current_encoder5}, {current_encoder6}")
+                    break
+
+                time.sleep(0.1)
             else:
-                logger.warning("Motors 5 and 6: motors did not start moving for offset")
-
-            # Wait for both motors to finish moving
-            while servo5.is_motor_running() or servo6.is_motor_running():
-                time.sleep(0.05)
-            logger.info("Motors 5 and 6: offset motion completed")
+                logger.warning("Motors 5 and 6: timeout waiting for offset motion to complete")
 
         # Set current positions as zero (after offset is applied)
         time.sleep(0.3)  # Ensure motors are fully settled before setting zero
@@ -1009,25 +1053,49 @@ class CanDriver():
         # Apply offset if configured
         if offset6 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 6 offset ({offset6}) at speed {offset_speed}...")
+
+            # Read encoders before move to track progress
+            encoder5_before_offset = servo5.read_encoder_value_addition()
+            encoder6_before_offset = servo6.read_encoder_value_addition()
+            logger.info(f"Motor 5 encoder before offset: {encoder5_before_offset}")
+            logger.info(f"Motor 6 encoder before offset: {encoder6_before_offset}")
+
             servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
             servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
 
-            # Wait for motors to start moving
-            time.sleep(0.1)
-            start_timeout = 2.0
+            # Wait for motion to complete by monitoring encoder positions
+            max_wait_time = 30.0
+            stable_count = 0
+            stable_threshold = 5
+            last_encoder5 = encoder5_before_offset
+            last_encoder6 = encoder6_before_offset
             start_time = time.time()
-            while not (servo5.is_motor_running() or servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
-                time.sleep(0.01)
 
-            if servo5.is_motor_running() or servo6.is_motor_running():
-                logger.info("Motors 5 and 6: offset motion started")
+            time.sleep(0.2)  # Initial delay to let motion start
+
+            while (time.time() - start_time) < max_wait_time:
+                current_encoder5 = servo5.read_encoder_value_addition()
+                current_encoder6 = servo6.read_encoder_value_addition()
+
+                # Check if both encoders are stable
+                stable5 = current_encoder5 is not None and last_encoder5 is not None and abs(current_encoder5 - last_encoder5) < 50
+                stable6 = current_encoder6 is not None and last_encoder6 is not None and abs(current_encoder6 - last_encoder6) < 50
+
+                if stable5 and stable6:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+
+                last_encoder5 = current_encoder5
+                last_encoder6 = current_encoder6
+
+                if stable_count >= stable_threshold:
+                    logger.info(f"Motors 5 and 6: offset motion completed, encoders stable at {current_encoder5}, {current_encoder6}")
+                    break
+
+                time.sleep(0.1)
             else:
-                logger.warning("Motors 5 and 6: motors did not start moving for offset")
-
-            # Wait for both motors to finish moving
-            while servo5.is_motor_running() or servo6.is_motor_running():
-                time.sleep(0.05)
-            logger.info("Motors 5 and 6: offset motion completed")
+                logger.warning("Motors 5 and 6: timeout waiting for offset motion to complete")
 
         # Set current positions as zero (after offset is applied)
         time.sleep(0.3)  # Ensure motors are fully settled before setting zero
