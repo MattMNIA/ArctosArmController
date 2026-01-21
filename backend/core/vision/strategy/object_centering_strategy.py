@@ -334,6 +334,10 @@ class ObjectCenteringStrategy:
         if self._worker:
             self._worker.join(timeout=1.0)
         self._worker = None
+
+        # Close MediaPipe resources to prevent "SolutionBase._graph already None" errors
+        self._close_mediapipe_resources()
+
         logger.info("Object centering strategy stopped")
         self._close_display_window()
 
@@ -935,6 +939,21 @@ class ObjectCenteringStrategy:
     def _record_status(self, payload: Dict[str, Any]) -> None:
         with self._lock:
             self._last_status = dict(payload)
+
+    def _close_mediapipe_resources(self) -> None:
+        """Close MediaPipe Hands solution to prevent resource leaks and double-close errors."""
+        with self._lock:
+            if self._hands is not None:
+                try:
+                    self._hands.close()
+                except Exception:
+                    logger.debug("Failed to close MediaPipe Hands (may already be closed)", exc_info=True)
+                finally:
+                    self._hands = None
+            # Clear stored hand data
+            self._last_hand_landmarks = None
+            self._last_handedness = None
+            self._last_gesture_overlays = []
 
     def _close_display_window(self) -> None:
         if not self._display_initialized or cv2 is None:

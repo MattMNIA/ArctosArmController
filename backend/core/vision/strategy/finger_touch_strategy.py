@@ -141,12 +141,22 @@ class FingerTouchStrategy:
 
     def close(self) -> None:
         with self._lock:
-            if self._hands:
-                self._hands.close()
+            # Close MediaPipe Hands with proper error handling to prevent
+            # "SolutionBase._graph already None" errors on mode switching
+            if self._hands is not None:
+                try:
+                    self._hands.close()
+                except Exception:
+                    pass  # Ignore errors if already closed
+                finally:
+                    self._hands = None
             if self._camera and self._camera.is_opened():
                 self._camera.release()
         if self._show_window:
-            cv2.destroyWindow(self._window_name)
+            try:
+                cv2.destroyWindow(self._window_name)
+            except Exception:
+                pass  # Window may already be closed
 
     def __del__(self) -> None:
         self.close()
