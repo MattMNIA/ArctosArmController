@@ -434,13 +434,13 @@ class FingerTouchStrategy:
                         self._pending_gesture_events.append(("press", "teleop_pause", 1.0))
                     self.set_teleop_mode("paused")
                     logger.info("Finger tracking paused by gesture (thumbs down)")
-                elif event.event == "teleop_unpause":
+                elif event.event == "teleop_resume":
                     # Emit event for TeleopController and update local display mode
                     with self._lock:
                         self._pending_gesture_events.append(("press", "teleop_resume", 1.0))
                     self.set_teleop_mode("active")
                     logger.info("Finger tracking resumed by gesture (thumbs up)")
-                elif event.event == "teleop_zero":
+                elif event.event == "zero_all_joints":
                     # Emit event for TeleopController and update local display mode
                     with self._lock:
                         self._pending_gesture_events.append(("press", "zero_all_joints", 1.0))

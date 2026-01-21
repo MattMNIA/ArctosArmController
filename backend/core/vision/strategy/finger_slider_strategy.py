@@ -527,6 +527,13 @@ class FingerSliderStrategy:
                 self._pending_gesture_events.append(
                     ("press", event.event, max(event.confidence, 0.0))
                 )
+                # Also update the local display mode for visual feedback
+                if event.event == "teleop_pause":
+                    self.set_teleop_mode("paused")
+                elif event.event == "teleop_resume":
+                    self.set_teleop_mode("active")
+                elif event.event == "zero_all_joints":
+                    self.set_teleop_mode("zeroing", hold_for=1.5)
             elif event.change == "end":
                 self._pending_gesture_events.append(("release", event.event, 0.0))
         overlay_rows.extend(overlays)
