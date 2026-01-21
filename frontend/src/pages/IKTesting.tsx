@@ -137,11 +137,12 @@ const URDFModel: React.FC<URDFProps> = ({ path, jointAngles, previewAngles, show
 };
 
 // Movement command definitions
+// Y axis = forward/back, X axis = left/right, Z axis = up/down
 const MOVEMENT_COMMANDS = {
-  forward: { label: 'Push Forward', icon: ArrowUp, delta: [0.05, 0, 0], description: '+X axis' },
-  backward: { label: 'Pull Back', icon: ArrowDown, delta: [-0.05, 0, 0], description: '-X axis' },
-  left: { label: 'Move Left', icon: ArrowLeft, delta: [0, 0.05, 0], description: '+Y axis' },
-  right: { label: 'Move Right', icon: ArrowRight, delta: [0, -0.05, 0], description: '-Y axis' },
+  forward: { label: 'Push Forward', icon: ArrowUp, delta: [0, 0.05, 0], description: '+Y axis' },
+  backward: { label: 'Pull Back', icon: ArrowDown, delta: [0, -0.05, 0], description: '-Y axis' },
+  left: { label: 'Move Left', icon: ArrowLeft, delta: [-0.05, 0, 0], description: '-X axis' },
+  right: { label: 'Move Right', icon: ArrowRight, delta: [0.05, 0, 0], description: '+X axis' },
   up: { label: 'Move Up', icon: ChevronUp, delta: [0, 0, 0.05], description: '+Z axis' },
   down: { label: 'Move Down', icon: ChevronDown, delta: [0, 0, -0.05], description: '-Z axis' },
 };
@@ -229,9 +230,12 @@ export default function IKTesting() {
     }
   };
 
-  // Handle relative movement commands
+  // Handle relative movement commands (incremental - accumulates from preview if active)
   const handleMovementCommand = async (command: keyof typeof MOVEMENT_COMMANDS) => {
-    if (!currentPose) {
+    // Use preview pose if in preview mode, otherwise use current pose
+    const basePose = showPreview && previewPose ? previewPose : currentPose;
+
+    if (!basePose) {
       setError('No current pose available. Make sure the arm is connected.');
       return;
     }
@@ -240,15 +244,18 @@ export default function IKTesting() {
     const scaledDelta = cmd.delta.map(d => d * (stepSize / 0.05)); // Scale by step size
 
     const targetPosition = [
-      currentPose.position[0] + scaledDelta[0],
-      currentPose.position[1] + scaledDelta[1],
-      currentPose.position[2] + scaledDelta[2],
+      basePose.position[0] + scaledDelta[0],
+      basePose.position[1] + scaledDelta[1],
+      basePose.position[2] + scaledDelta[2],
     ];
+
+    // Use the base pose's orientation to maintain consistency
+    const baseEuler = basePose.euler || currentPose?.euler || [0, 0, 0];
 
     setLastCommand(cmd.label);
     await computeIK({
       position: targetPosition,
-      euler: currentPose.euler,
+      euler: baseEuler,
     });
   };
 
@@ -300,11 +307,11 @@ export default function IKTesting() {
     setLastCommand(null);
   };
 
-  // Home position
+  // Home position (X: 0.2mm, Y: -316.8mm, Z: 570.3mm)
   const goHome = async () => {
     setLastCommand('Home Position');
     await computeIK({
-      position: [0.3, 0, 0.3],
+      position: [0.0002, -0.3168, 0.5703],
       euler: [0, 0, 0],
     });
   };
