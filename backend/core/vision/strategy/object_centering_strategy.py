@@ -298,6 +298,8 @@ class ObjectCenteringStrategy:
                 logger.warning("Failed to initialize gesture recognition: %s", exc)
                 self._enable_gestures = False
         self._paused = False
+        self._last_gesture_process_time = 0.0
+        self._gesture_process_interval = 0.15  # Only process gestures every 150ms to reduce CPU load
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -1028,7 +1030,10 @@ class ObjectCenteringStrategy:
         return max(0.1, min(1.0, scale))
 
     def _process_gestures(self, frame: np.ndarray) -> None:
-        """Process gestures from the frame and handle actions."""
+        """Process gestures from the frame and handle actions.
+
+        Rate-limited to avoid blocking the control loop with MediaPipe inference.
+        """
         if self._hands is None or self._gesture_recognizer is None:
             logger.debug("Gesture recognition not available (hands or recognizer not initialized)")
             return
@@ -1036,6 +1041,12 @@ class ObjectCenteringStrategy:
         if not self._gesture_recognizer.enabled:
             logger.debug("Gesture recognizer not enabled (no classifier loaded)")
             return
+
+        # Rate limit gesture processing to avoid blocking
+        current_time = time.time()
+        if current_time - self._last_gesture_process_time < self._gesture_process_interval:
+            return
+        self._last_gesture_process_time = current_time
 
         # Convert BGR to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if cv2 is not None else frame

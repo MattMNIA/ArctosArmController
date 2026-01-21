@@ -9,6 +9,7 @@ import { ConnectionIndicator } from '../components/ui/ConnectionIndicator';
 import { AlertBanner } from '../components/ui/AlertBanner';
 import { PageHeader } from '../components/layout/PageHeader';
 import { useSocketConnection } from '../hooks/useSocketConnection';
+import { api, getSocketUrl } from '../api';
 
 type TeleopModeOptionSchema = {
   type: 'string' | 'boolean';
@@ -106,11 +107,7 @@ export default function RobotControl() {
 
   const fetchTeleopModes = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/teleop/modes');
-      if (!res.ok) {
-        throw new Error(`Request failed with status ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await api.get<{ modes: TeleopModeDefinition[] }>('/api/teleop/modes');
       const modes = Array.isArray(data.modes) ? data.modes : [];
       setTeleopModes(modes);
     } catch (error) {
@@ -121,11 +118,7 @@ export default function RobotControl() {
 
   const fetchTeleopState = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/teleop/state');
-      if (!res.ok) {
-        throw new Error(`Request failed with status ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await api.get<{ state: TeleopStateSnapshot }>('/api/teleop/state');
       const state = data.state ?? data;
       setTeleopState({
         mode: state.mode ?? null,
@@ -146,25 +139,10 @@ export default function RobotControl() {
     setTeleopError(null);
     try {
       const optionsPayload = sanitizeTeleopOptions(teleopOptions);
-      const res = await fetch('http://localhost:5000/api/teleop/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: selectedTeleopMode, options: optionsPayload }),
+      const data = await api.post<{ state: TeleopStateSnapshot }>('/api/teleop/start', {
+        mode: selectedTeleopMode,
+        options: optionsPayload,
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        let message = errorText || `Request failed with status ${res.status}`;
-        try {
-          const parsed = JSON.parse(errorText);
-          if (parsed && typeof parsed === 'object' && 'error' in parsed) {
-            message = String(parsed.error);
-          }
-        } catch (_) {
-          // ignore JSON parsing error; fall back to text message
-        }
-        throw new Error(message);
-      }
-      const data = await res.json();
       const state = data.state ?? data;
       setTeleopState({
         mode: state.mode ?? null,
@@ -185,24 +163,7 @@ export default function RobotControl() {
     setTeleopBusy(true);
     setTeleopError(null);
     try {
-      const res = await fetch('http://localhost:5000/api/teleop/stop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!res.ok) {
-        const errorText = await res.text();
-        let message = errorText || `Request failed with status ${res.status}`;
-        try {
-          const parsed = JSON.parse(errorText);
-          if (parsed && typeof parsed === 'object' && 'error' in parsed) {
-            message = String(parsed.error);
-          }
-        } catch (_) {
-          // ignore JSON parsing error; fall back to text message
-        }
-        throw new Error(message);
-      }
-      const data = await res.json();
+      const data = await api.post<{ state: TeleopStateSnapshot }>('/api/teleop/stop');
       const state = data.state ?? data;
       setTeleopState({
         mode: state.mode ?? null,
@@ -274,7 +235,7 @@ export default function RobotControl() {
     }
   }, [useEulerAngles]);
 
-  const { status: connectionStatus, reconnect } = useSocketConnection('http://localhost:5000', {
+  const { status: connectionStatus, reconnect } = useSocketConnection(getSocketUrl(), {
     registerHandlers: useCallback((socket: Socket) => {
       const handleStatus = (data: { msg: string }) => {
         setMsg(data.msg);
@@ -330,15 +291,7 @@ export default function RobotControl() {
         pose.orientation = orientation;
       }
       
-      const res = await fetch("http://localhost:5000/api/ik/solve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          pose, 
-          seed
-        })
-      });
-      const data = await res.json();
+      const data = await api.post<{ joints: number[] }>('/api/ik/solve', { pose, seed });
       const newJoints = (data.joints as number[]).map((j: number) => j * 180 / Math.PI);
       setSolvedJoints(newJoints);
     } catch (error) {
@@ -352,14 +305,9 @@ export default function RobotControl() {
     setLoading(true);
     try {
       const jointValues = jointInputs.map(j => parseFloat(j) || 0);
-      const res = await fetch("http://localhost:5000/api/ik/fk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          joints: jointValues.map((j: number) => j * Math.PI / 180) 
-        })
+      const data = await api.post<{ position: number[]; orientation: number[] }>('/api/ik/fk', {
+        joints: jointValues.map((j: number) => j * Math.PI / 180),
       });
-      const data = await res.json();
       if (data.position && data.orientation) {
         setFkResult({
           position: data.position,
@@ -379,11 +327,7 @@ export default function RobotControl() {
     setLoading(true);
     try {
       const jointValues = jointInputs.map(j => parseFloat(j) || 0);
-      await fetch("http://localhost:5000/api/execute/joints", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: jointValues.map((j: number) => j * Math.PI / 180) })
-      });
+      await api.post('/api/execute/joints', { q: jointValues.map((j: number) => j * Math.PI / 180) });
     } catch (error) {
       console.error("Execute move failed:", error);
     } finally {
@@ -395,11 +339,7 @@ export default function RobotControl() {
     if (!solvedJoints) return;
     setLoading(true);
     try {
-      await fetch("http://localhost:5000/api/execute/joints", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: solvedJoints.map((j: number) => j * Math.PI / 180) })
-      });
+      await api.post('/api/execute/joints', { q: solvedJoints.map((j: number) => j * Math.PI / 180) });
     } catch (error) {
       console.error("Execute solved IK failed:", error);
     } finally {
@@ -409,13 +349,7 @@ export default function RobotControl() {
 
   const openGripper = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/execute/open_gripper", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) {
-        alert("Failed to open gripper");
-      }
+      await api.post('/api/execute/open_gripper');
     } catch (error) {
       alert("Error opening gripper");
     }
@@ -423,13 +357,7 @@ export default function RobotControl() {
 
   const closeGripper = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/execute/close_gripper", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) {
-        alert("Failed to close gripper");
-      }
+      await api.post('/api/execute/close_gripper');
     } catch (error) {
       alert("Error closing gripper");
     }
@@ -438,14 +366,7 @@ export default function RobotControl() {
   const setGripper = async () => {
     try {
       const position = parseFloat(gripperInput) || 0;
-      const res = await fetch("http://localhost:5000/api/execute/set_gripper_position", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ position }),
-      });
-      if (!res.ok) {
-        alert("Failed to set gripper position");
-      }
+      await api.post('/api/execute/set_gripper_position', { position });
     } catch (error) {
       alert("Error setting gripper position");
     }
@@ -456,15 +377,8 @@ export default function RobotControl() {
       const confirmed = window.confirm("Are you sure you want to EMERGENCY STOP all motors? This will immediately halt all movement.");
       if (!confirmed) return;
 
-      const res = await fetch("http://localhost:5000/api/execute/estop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) {
-        alert("Failed to execute emergency stop");
-      } else {
-        alert("Emergency stop executed successfully");
-      }
+      await api.post('/api/execute/estop');
+      alert("Emergency stop executed successfully");
     } catch (error) {
       alert("Error executing emergency stop");
     }

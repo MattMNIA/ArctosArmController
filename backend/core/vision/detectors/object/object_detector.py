@@ -106,16 +106,28 @@ class ObjectDetector(BaseDetector):
 		frame: Optional[np.ndarray] = None,
 		copy_frame: bool = False,
 		return_frame: bool = True,
+		allow_cached: bool = True,
 	) -> Optional[DetectionResult]:
 		# If providing a specific frame, process it synchronously
 		if frame is not None:
 			return self._detect_frame(frame, copy_frame, return_frame)
-		
-		# If background detection is running, return the latest cached result
+
+		# If background detection is running, ALWAYS return cached result
+		# to avoid blocking the caller (critical for responsive arm control)
 		if self._worker_thread and self._worker_thread.is_alive():
 			with self._lock:
 				return self._last_result
-		
+
+		# If we have a recent cached result and caching is allowed, use it
+		# This prevents blocking when called rapidly
+		if allow_cached:
+			with self._lock:
+				if self._last_result is not None:
+					age = time.time() - self._last_result.timestamp
+					# Use cached result if less than 200ms old
+					if age < 0.2:
+						return self._last_result
+
 		# Otherwise, perform synchronous detection
 		return self._detect_frame(None, copy_frame, return_frame)
 

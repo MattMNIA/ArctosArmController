@@ -994,45 +994,46 @@ class CanDriver():
             try:
                 encoder_val = self.angle_to_encoder(angle_rad, motor_id)
                 logger.debug(f"Motor {motor_id}: {math.degrees(angle_rad):.2f}° -> enc {encoder_val}")
-                
+
                 with self._servo_lock:
                     if motor_id >= len(self.servos):
                         logger.error(f"Servo index {motor_id} out of range")
                         return False
-                    
-                    # Get current position to determine movement direction
-                    current_encoder = self._read_encoder_with_fallback(motor_id, self.servos[motor_id])
-                    if current_encoder is None:
-                        logger.warning(f"Could not read current position for motor {motor_id}, skipping movement check")
-                    else:
-                        # Determine direction
-                        if encoder_val > current_encoder:
-                            direction = 'CW'
-                        elif encoder_val < current_encoder:
-                            direction = 'CCW'
-                        else:
-                            direction = None  # No movement
-                        
-                        # Check if movement is allowed
-                        if direction and not self.is_movement_allowed(motor_id, direction):
-                            logger.warning(f"Absolute movement not allowed for motor {motor_id} in direction {direction} due to coupled endstop constraint")
-                            return False
-                    
+
+                    # Only check direction for coupled motors (4 and 5) to avoid
+                    # unnecessary CAN reads that add ~100ms latency per motor.
+                    # The is_movement_allowed() check only applies to these motors anyway.
+                    if motor_id in [4, 5]:
+                        current_encoder = self._read_encoder_with_fallback(motor_id, self.servos[motor_id])
+                        if current_encoder is not None:
+                            # Determine direction
+                            if encoder_val > current_encoder:
+                                direction = 'CW'
+                            elif encoder_val < current_encoder:
+                                direction = 'CCW'
+                            else:
+                                direction = None  # No movement
+
+                            # Check if movement is allowed for coupled motors
+                            if direction and not self.is_movement_allowed(motor_id, direction):
+                                logger.warning(f"Absolute movement not allowed for motor {motor_id} in direction {direction} due to coupled endstop constraint")
+                                return False
+
                     # Get motor-specific speed and acceleration
                     motor_config = self.get_motor_config(motor_id)
                     speed = abs(motor_config['speed_rpm'])
                     acc = motor_config['acceleration']
-                    
+
                     result = self.servos[motor_id].run_motor_absolute_motion_by_axis(
                         speed, acc, encoder_val
                     )
-                    
+
                     if result is None:
                         logger.warning(f"Failed to send command to servo {motor_id+1}")
                         return False
-                    
+
                     return True
-                    
+
             except Exception as e:
                 logger.error(f"Failed to send command to servo {motor_id+1}: {e}")
                 return False
