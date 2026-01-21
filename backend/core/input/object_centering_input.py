@@ -121,7 +121,9 @@ class ObjectCenteringInput(InputController):
         return self._strategy.get_status()
 
     def close(self) -> None:
-        self._strategy.stop()
+        # Strategy.stop() handles closing the detector and releasing camera resources
+        if hasattr(self, '_strategy') and self._strategy is not None:
+            self._strategy.stop()
 
     def __del__(self) -> None:
         try:

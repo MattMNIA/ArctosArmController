@@ -191,3 +191,14 @@ class FaceDetector(BaseDetector):
                 logger.exception("FaceDetector background loop failed: %s", exc)
             if poll_interval > 0.0:
                 self._stop_event.wait(poll_interval)
+
+    def close(self) -> None:
+        """Stop detection and release camera resources."""
+        self.stop()
+        with self._lock:
+            if self._camera is not None:
+                try:
+                    self._camera.release()
+                except Exception:
+                    pass  # Ignore errors if already released
+            self._camera = None

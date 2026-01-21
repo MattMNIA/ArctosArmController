@@ -121,6 +121,10 @@ class BaseDetector(ABC):
                 logger.warning("Detector thread did not stop within timeout")
             self._worker_thread = None
 
+    def close(self) -> None:
+        """Stop detection and release resources. Subclasses should override to release camera."""
+        self.stop()
+
     def stream(
         self,
         *,

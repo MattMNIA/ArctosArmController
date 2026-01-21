@@ -131,6 +131,16 @@ class TeleopManager:
         if not self._motion_service.running:
             raise TeleopManagerError("Motion service is not running")
 
+        # Stop the old mode FIRST to release resources (especially camera)
+        # before creating the new input controller
+        with self._lock:
+            self._stop_locked()
+
+        # Brief delay to ensure camera resources are fully released
+        # (IP cameras may need time to close the stream connection)
+        time.sleep(0.3)
+
+        # Now create the new input controller after old resources are released
         input_controller = self._create_input_controller(normalized_mode, options)
         teleop_controller = TeleopController(input_controller, self._driver, self._motion_service)
 
@@ -139,7 +149,6 @@ class TeleopManager:
             teleop_controller._paused = False
 
         with self._lock:
-            self._stop_locked()
             self._teleop_controller = teleop_controller
             self._input_controller = input_controller
             self._current_mode = normalized_mode

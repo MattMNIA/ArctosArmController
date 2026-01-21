@@ -2,6 +2,7 @@ python-can
 pyserial
 PyYAML
 pybullet
+flask
 flask-cors
 requests
 opencv-contrib-python

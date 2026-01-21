@@ -98,6 +98,12 @@ class ObjectDetector(BaseDetector):
 	def close(self) -> None:
 		self.stop()
 		with self._lock:
+			# Release the camera properly before clearing the reference
+			if self._camera is not None:
+				try:
+					self._camera.release()
+				except Exception:
+					pass  # Ignore errors if already released
 			self._camera = None
 
 	def detect(

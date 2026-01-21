@@ -330,10 +330,15 @@ class ObjectCenteringStrategy:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._detector.stop()
         if self._worker:
             self._worker.join(timeout=1.0)
         self._worker = None
+
+        # Close detector (which stops it and releases camera resources)
+        if hasattr(self._detector, 'close'):
+            self._detector.close()
+        else:
+            self._detector.stop()
 
         # Close MediaPipe resources to prevent "SolutionBase._graph already None" errors
         self._close_mediapipe_resources()
