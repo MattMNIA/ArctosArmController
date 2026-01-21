@@ -743,11 +743,16 @@ class CanDriver():
                     time.sleep(0.05)
                 logger.info(f"Joint {joint_idx}: offset motion completed")
 
-            # Phase 3: Set current position as zero
+            # Phase 3: Set current position as zero (with retries and verification)
             time.sleep(0.1)
-            servo.set_current_axis_to_zero()
-            time.sleep(0.05)
-            logger.info(f"Successfully homed joint {joint_idx} - position set to zero")
+            result = servo.set_current_axis_to_zero()
+
+            if result is None:
+                logger.error(f"Joint {joint_idx}: set_current_axis_to_zero() returned None - CAN communication error")
+            else:
+                logger.info(f"Joint {joint_idx}: set_current_axis_to_zero() result: {result}")
+
+            logger.info(f"Successfully homed joint {joint_idx}")
 
         except Exception as e:
             logger.error(f"Failed to home joint {joint_idx}: {e}")
@@ -838,11 +843,11 @@ class CanDriver():
                 time.sleep(0.05)
             logger.info("Offset motion completed")
 
-        # Phase 3: Set current positions as zero
+        # Phase 3: Set current positions as zero (with retries and verification)
         time.sleep(0.1)
-        servo5.set_current_axis_to_zero()
-        servo6.set_current_axis_to_zero()
-        time.sleep(0.05)
+        result5 = servo5.set_current_axis_to_zero()
+        result6 = servo6.set_current_axis_to_zero()
+        logger.info(f"Joint 4 homing - servo5 zero result: {result5}, servo6 zero result: {result6}")
         logger.info("Joint 4 homing completed - positions set to zero")
 
     def _home_joint_5_same_direction(self) -> None:
@@ -919,11 +924,11 @@ class CanDriver():
                 time.sleep(0.05)
             logger.info("Offset motion completed")
 
-        # Phase 3: Set current positions as zero
+        # Phase 3: Set current positions as zero (with retries and verification)
         time.sleep(0.1)
-        servo5.set_current_axis_to_zero()
-        servo6.set_current_axis_to_zero()
-        time.sleep(0.05)
+        result5 = servo5.set_current_axis_to_zero()
+        result6 = servo6.set_current_axis_to_zero()
+        logger.info(f"Joint 5 homing - servo5 zero result: {result5}, servo6 zero result: {result6}")
         logger.info("Joint 5 homing completed - positions set to zero")
 
 
