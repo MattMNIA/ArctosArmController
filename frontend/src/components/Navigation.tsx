@@ -25,10 +25,11 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'homing', label: 'Motor Homing', public: false },
     { id: 'config', label: 'Motor Config', public: false },
     { id: 'visualization', label: '3D Visualization', public: false },
+    { id: 'ik-testing', label: 'IK Testing', public: false },
     { id: 'pid-tuning', label: 'PID Tuning', public: false },
   ].filter((i) => (allowPrivateNav ? true : i.public));
 
-  const desktopNavIds = ['landing', 'control', 'status', 'dashboard', 'simulation', 'homing', 'visualization', 'pid-tuning'];
+  const desktopNavIds = ['landing', 'control', 'status', 'dashboard', 'simulation', 'homing', 'visualization', 'ik-testing', 'pid-tuning'];
   const desktopNavItems = navItems.filter((item) => desktopNavIds.includes(item.id));
 
   // keep an activeSection in sync with currentPage for styling parity

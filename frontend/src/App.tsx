@@ -10,6 +10,7 @@ import MotorHoming from './pages/MotorHoming';
 import ArmVisualization from './pages/ArmVisualization';
 import MotorConfig from './pages/MotorConfig';
 import PIDTuning from './pages/PIDTuning';
+import IKTesting from './pages/IKTesting';
 import { isPrivateBuild } from './utils/buildFlags';
 
 function App() {
@@ -59,6 +60,8 @@ function App() {
         return allowPrivate ? <RobotControl /> : <LandingPage />;
       case 'pid-tuning':
         return allowPrivate ? <PIDTuning /> : <LandingPage />;
+      case 'ik-testing':
+        return allowPrivate ? <IKTesting /> : <LandingPage />;
       default:
         return allowPrivate ? <RobotControl /> : <LandingPage />;
     }
