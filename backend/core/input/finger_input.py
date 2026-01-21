@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .base_input import InputController
@@ -24,6 +25,8 @@ class FingerInput(InputController):
         window_name: str = "Finger Input",
         fullscreen: bool = False,
         allow_fullscreen_toggle: bool = True,
+        enable_gestures: bool = True,
+        gesture_config_path: Optional[Path | str] = None,
     ) -> None:
         self._strategy = FingerTouchStrategy(
             camera_index=camera_index,
@@ -38,6 +41,8 @@ class FingerInput(InputController):
             window_name=window_name,
             fullscreen=fullscreen,
             allow_fullscreen_toggle=allow_fullscreen_toggle,
+            enable_gestures=enable_gestures,
+            gesture_config_path=gesture_config_path,
         )
 
     @property

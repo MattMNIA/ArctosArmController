@@ -1,11 +1,16 @@
+import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import cv2
 import mediapipe as mp
 
 from ..cameras.local_camera import LocalCamera
+from ..detectors.gesture.gesture_recognizer import GestureRecognizer
+
+logger = logging.getLogger(__name__)
 
 
 class FingerTouchStrategy:
@@ -40,6 +45,8 @@ class FingerTouchStrategy:
         window_name: str = "Finger Input",
         fullscreen: bool = False,
         allow_fullscreen_toggle: bool = True,
+        enable_gestures: bool = True,
+        gesture_config_path: Optional[Path | str] = None,
     ) -> None:
         self._camera = LocalCamera(camera_index)
         self._camera_index = self._camera.camera_index
@@ -72,6 +79,24 @@ class FingerTouchStrategy:
         self._teleop_mode: str = "paused"
         self._teleop_mode_previous: str = "paused"
         self._teleop_mode_timer: Optional[float] = None
+
+        # Gesture recognition for pause/unpause control
+        self._enable_gestures = bool(enable_gestures)
+        self._gesture_recognizer: Optional[GestureRecognizer] = None
+        self._last_gesture_overlays: List[str] = []
+        self._last_gesture_process_time = 0.0
+        self._gesture_process_interval = 0.15  # Only process gestures every 150ms
+
+        if self._enable_gestures:
+            try:
+                self._gesture_recognizer = GestureRecognizer(config_path=gesture_config_path, model="mlp")
+                if self._gesture_recognizer.enabled:
+                    logger.info("Gesture recognition enabled for finger tracking (thumbs up/down to pause/resume)")
+                else:
+                    logger.warning("Gesture recognizer loaded but classifier not available")
+            except Exception as exc:
+                logger.warning("Failed to initialize gesture recognition: %s", exc)
+                self._enable_gestures = False
 
         if self._show_window:
             cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
@@ -181,6 +206,10 @@ class FingerTouchStrategy:
 
         gestures: Dict[str, Optional[str]] = {"Left": None, "Right": None}
         if results.multi_hand_landmarks and results.multi_handedness:
+            # Process gestures for pause/unpause if enabled
+            if self._enable_gestures and self._gesture_recognizer is not None:
+                self._process_gestures(results.multi_hand_landmarks, results.multi_handedness)
+
             for hand_landmarks, handedness in zip(
                 results.multi_hand_landmarks, results.multi_handedness
             ):
@@ -237,6 +266,35 @@ class FingerTouchStrategy:
                 2 if mode_text == "ZEROING" else 1,
                 cv2.LINE_AA,
             )
+
+            # Show gesture hint when paused
+            if mode_text == "PAUSED" and self._enable_gestures:
+                cv2.putText(
+                    frame_to_show,
+                    "Thumbs up to resume",
+                    (10, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (200, 200, 200),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            # Show gesture overlays if available
+            if self._last_gesture_overlays:
+                y_offset = 90
+                for overlay in self._last_gesture_overlays[:2]:
+                    cv2.putText(
+                        frame_to_show,
+                        overlay,
+                        (10, y_offset),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (255, 200, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
+                    y_offset += 18
             cv2.imshow(self._window_name, frame_to_show)
             key = cv2.waitKey(1) & 0xFF
             if self._allow_fullscreen_toggle and key in (ord("f"), ord("F")):
@@ -339,3 +397,39 @@ class FingerTouchStrategy:
         avg_extent = 0.5 * (w + h)
         radius = int(max(2.0, min(threshold * avg_extent, float(max(w, h)))))
         cv2.circle(frame, (cx, cy), radius, (255, 200, 0), 1, lineType=cv2.LINE_AA)
+
+    def _process_gestures(self, hand_landmarks_list, handedness_list) -> None:
+        """Process gestures from the hand landmarks and handle pause/unpause.
+
+        Thumbs up = resume (active), Thumbs down = pause
+        """
+        if self._gesture_recognizer is None or not self._gesture_recognizer.enabled:
+            return
+
+        # Rate limit gesture processing
+        current_time = time.time()
+        if current_time - self._last_gesture_process_time < self._gesture_process_interval:
+            return
+        self._last_gesture_process_time = current_time
+
+        try:
+            events, overlays = self._gesture_recognizer.process(hand_landmarks_list, handedness_list)
+            with self._lock:
+                self._last_gesture_overlays = overlays
+
+            # Handle gesture events
+            for event in events:
+                if event.event == "teleop_pause":
+                    self.set_teleop_mode("paused")
+                    logger.info("Finger tracking paused by gesture (thumbs down)")
+                elif event.event == "teleop_unpause":
+                    self.set_teleop_mode("active")
+                    logger.info("Finger tracking resumed by gesture (thumbs up)")
+                elif event.event == "teleop_zero":
+                    self.set_teleop_mode("zeroing", hold_for=1.5)
+                    logger.info("Moving to zero pose by gesture (rock and roll)")
+
+        except Exception as exc:
+            logger.debug("Gesture processing error: %s", exc)
+            with self._lock:
+                self._last_gesture_overlays = []
