@@ -45,6 +45,17 @@ interface IKResult {
   error: number | string;
 }
 
+interface LinearPreviewResult {
+  success: boolean;
+  steps: number;
+  start_position: number[];
+  end_position: number[];
+  cartesian_waypoints: Array<{ position: number[]; euler: number[] }>;
+  joint_trajectory: number[][];
+  final_joints: number[];
+  error?: string;
+}
+
 // URDF Model component with preview support
 const URDFModel: React.FC<URDFProps> = ({ path, jointAngles, previewAngles, showPreview, gripperPosition = 0 }) => {
   const urdf = useLoader(
@@ -153,10 +164,13 @@ export default function IKTesting() {
   const [currentPose, setCurrentPose] = useState<FKResult | null>(null);
   const [previewJoints, setPreviewJoints] = useState<number[] | null>(null);
   const [previewPose, setPreviewPose] = useState<FKResult | null>(null);
+  const [previewTrajectory, setPreviewTrajectory] = useState<LinearPreviewResult | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stepSize, setStepSize] = useState(0.05); // meters
+  const [interpolationSteps, setInterpolationSteps] = useState(10);
+  const [moveDuration, setMoveDuration] = useState(2.0); // seconds
   const [lastCommand, setLastCommand] = useState<string | null>(null);
 
   // Custom position inputs
@@ -196,31 +210,33 @@ export default function IKTesting() {
     fetchCurrentPose();
   }, [connected, telemetry?.q]);
 
-  // Compute IK for a target pose
+  // Compute linear interpolated IK for a target pose
   const computeIK = async (targetPose: { position: number[]; euler?: number[] }) => {
     setLoading(true);
     setError(null);
 
     try {
-      const result = await api.post<IKResult>('/api/ik/solve', {
+      // Use linear preview to get interpolated trajectory
+      const result = await api.post<LinearPreviewResult>('/api/ik/linear_preview', {
         pose: targetPose,
-        seed: telemetry?.q || [],
+        steps: interpolationSteps,
       });
 
       if (!result.success) {
-        throw new Error(typeof result.error === 'string' ? result.error : 'IK solve failed');
+        throw new Error(result.error || 'Linear IK preview failed');
       }
 
-      // Get the FK for preview
+      // Get the FK for final pose preview
       const fkResult = await api.post<FKResult>('/api/ik/fk', {
-        joints: result.joints,
+        joints: result.final_joints,
       });
 
-      setPreviewJoints(result.joints);
+      setPreviewJoints(result.final_joints);
       setPreviewPose(fkResult);
+      setPreviewTrajectory(result);
       setShowPreview(true);
 
-      return result.joints;
+      return result.final_joints;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to compute IK';
       setError(message);
@@ -276,20 +292,27 @@ export default function IKTesting() {
     await computeIK({ position, euler });
   };
 
-  // Execute the previewed move
+  // Execute the previewed move using linear interpolation
   const executeMove = async () => {
-    if (!previewJoints) return;
+    if (!previewPose) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      await api.post('/api/execute/joints', {
-        q: previewJoints,
+      // Execute linear interpolated move to the preview position
+      await api.post('/api/ik/linear_move', {
+        pose: {
+          position: previewPose.position,
+          euler: previewPose.euler,
+        },
+        steps: interpolationSteps,
+        duration_s: moveDuration,
       });
       setShowPreview(false);
       setPreviewJoints(null);
       setPreviewPose(null);
+      setPreviewTrajectory(null);
       setLastCommand(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to execute move';
@@ -304,6 +327,7 @@ export default function IKTesting() {
     setShowPreview(false);
     setPreviewJoints(null);
     setPreviewPose(null);
+    setPreviewTrajectory(null);
     setLastCommand(null);
   };
 
@@ -368,10 +392,17 @@ export default function IKTesting() {
             <div className="relative h-[500px]">
               {/* Preview indicator */}
               {showPreview && (
-                <div className="absolute top-4 left-4 z-10 bg-blue-600/90 backdrop-blur-sm rounded-lg px-3 py-2 flex items-center gap-2">
-                  <Eye className="w-4 h-4" />
-                  <span className="text-sm font-medium">Preview Mode</span>
-                  {lastCommand && <span className="text-xs opacity-75">({lastCommand})</span>}
+                <div className="absolute top-4 left-4 z-10 bg-blue-600/90 backdrop-blur-sm rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4" />
+                    <span className="text-sm font-medium">Preview Mode</span>
+                    {lastCommand && <span className="text-xs opacity-75">({lastCommand})</span>}
+                  </div>
+                  {previewTrajectory && (
+                    <div className="text-xs mt-1 opacity-75">
+                      Linear path: {previewTrajectory.steps} steps, {moveDuration}s
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -484,6 +515,33 @@ export default function IKTesting() {
                       {size * 1000}mm
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Motion settings */}
+              <div className="mb-4 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Interpolation Steps</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="50"
+                    value={interpolationSteps}
+                    onChange={(e) => setInterpolationSteps(Math.max(5, Math.min(50, parseInt(e.target.value) || 10)))}
+                    className="w-full px-2 py-1.5 rounded-lg border border-gray-600 bg-gray-700 text-white text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Duration (s)</label>
+                  <input
+                    type="number"
+                    min="0.5"
+                    max="10"
+                    step="0.5"
+                    value={moveDuration}
+                    onChange={(e) => setMoveDuration(Math.max(0.5, Math.min(10, parseFloat(e.target.value) || 2)))}
+                    className="w-full px-2 py-1.5 rounded-lg border border-gray-600 bg-gray-700 text-white text-sm"
+                  />
                 </div>
               </div>
 

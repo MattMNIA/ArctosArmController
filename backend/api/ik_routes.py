@@ -1,5 +1,6 @@
 # api/ik_routes.py
 from flask import Blueprint, request, jsonify
+import numpy as np
 
 ik_bp = Blueprint('ik', __name__)
 
@@ -59,3 +60,216 @@ def compute_fk():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"Forward kinematics failed: {str(e)}"}), 500
+
+
+@ik_bp.route('/linear_move', methods=['POST'])
+def linear_move():
+    """Execute a linear (straight-line) interpolated movement in Cartesian space.
+
+    This endpoint computes waypoints along a straight line from current position
+    to target position, solves IK for each waypoint, and executes them sequentially.
+    """
+    from flask import current_app
+    from core.motion_service import JointCommand
+
+    try:
+        data = request.get_json(silent=True)
+    except Exception as e:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    target_pose = data.get("pose")
+    num_steps = data.get("steps", 10)  # Number of interpolation steps
+    duration_s = data.get("duration_s", 2.0)  # Total duration for the move
+
+    if not target_pose:
+        return jsonify({"error": "No target pose provided"}), 400
+
+    target_position = target_pose.get("position")
+    target_euler = target_pose.get("euler", [0, 0, 0])
+
+    if not target_position or len(target_position) != 3:
+        return jsonify({"error": "Invalid target position"}), 400
+
+    # Get services
+    ik_solver = current_app.config.get('ik_solver')
+    motion_service = current_app.config.get('motion_service')
+
+    if not ik_solver:
+        return jsonify({"error": "IK solver not available"}), 503
+    if not motion_service or not motion_service.running:
+        return jsonify({"error": "Motion service not running"}), 503
+
+    try:
+        # Get current joint positions
+        feedback = motion_service.driver.get_feedback()
+        current_joints = feedback.get("q", [])
+
+        if not current_joints or len(current_joints) < 6:
+            return jsonify({"error": "Could not get current joint positions"}), 500
+
+        # Get current Cartesian position via FK
+        current_fk = ik_solver.forward_kinematics(current_joints)
+        current_position = current_fk.get("position", [0, 0, 0])
+        current_euler = current_fk.get("euler", [0, 0, 0])
+
+        # Generate interpolated waypoints
+        waypoints = []
+        step_duration = duration_s / num_steps
+
+        for i in range(1, num_steps + 1):
+            t = i / num_steps  # Interpolation parameter [0, 1]
+
+            # Linear interpolation for position
+            interp_position = [
+                current_position[0] + t * (target_position[0] - current_position[0]),
+                current_position[1] + t * (target_position[1] - current_position[1]),
+                current_position[2] + t * (target_position[2] - current_position[2]),
+            ]
+
+            # Linear interpolation for orientation
+            interp_euler = [
+                current_euler[0] + t * (target_euler[0] - current_euler[0]),
+                current_euler[1] + t * (target_euler[1] - current_euler[1]),
+                current_euler[2] + t * (target_euler[2] - current_euler[2]),
+            ]
+
+            waypoints.append({
+                "position": interp_position,
+                "euler": interp_euler,
+            })
+
+        # Solve IK for each waypoint
+        joint_trajectory = []
+        seed = current_joints
+
+        for i, waypoint in enumerate(waypoints):
+            ik_result = ik_solver.solve(waypoint, seed)
+
+            if not ik_result.get("success", False):
+                return jsonify({
+                    "error": f"IK failed at waypoint {i + 1}/{num_steps}",
+                    "waypoint": waypoint,
+                    "success": False
+                }), 400
+
+            joint_trajectory.append(ik_result["joints"])
+            seed = ik_result["joints"]  # Use solution as seed for next waypoint
+
+        # Enqueue all joint commands
+        for joints in joint_trajectory:
+            cmd = JointCommand(q=joints, duration_s=step_duration)
+            motion_service.enqueue(cmd)
+
+        return jsonify({
+            "success": True,
+            "status": "linear move queued",
+            "steps": num_steps,
+            "duration_s": duration_s,
+            "start_position": current_position,
+            "end_position": target_position,
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Linear move failed: {str(e)}", "success": False}), 500
+
+
+@ik_bp.route('/linear_preview', methods=['POST'])
+def linear_preview():
+    """Preview a linear interpolated movement - returns the trajectory without executing.
+
+    Returns the joint trajectory and Cartesian waypoints for visualization.
+    """
+    from flask import current_app
+
+    try:
+        data = request.get_json(silent=True)
+    except Exception as e:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    target_pose = data.get("pose")
+    num_steps = data.get("steps", 10)
+
+    if not target_pose:
+        return jsonify({"error": "No target pose provided"}), 400
+
+    target_position = target_pose.get("position")
+    target_euler = target_pose.get("euler", [0, 0, 0])
+
+    if not target_position or len(target_position) != 3:
+        return jsonify({"error": "Invalid target position"}), 400
+
+    ik_solver = current_app.config.get('ik_solver')
+    motion_service = current_app.config.get('motion_service')
+
+    if not ik_solver:
+        return jsonify({"error": "IK solver not available"}), 503
+    if not motion_service:
+        return jsonify({"error": "Motion service not available"}), 503
+
+    try:
+        # Get current joint positions
+        feedback = motion_service.driver.get_feedback()
+        current_joints = feedback.get("q", [])
+
+        if not current_joints or len(current_joints) < 6:
+            return jsonify({"error": "Could not get current joint positions"}), 500
+
+        # Get current Cartesian position via FK
+        current_fk = ik_solver.forward_kinematics(current_joints)
+        current_position = current_fk.get("position", [0, 0, 0])
+        current_euler = current_fk.get("euler", [0, 0, 0])
+
+        # Generate interpolated waypoints
+        cartesian_waypoints = []
+        joint_trajectory = []
+        seed = current_joints
+
+        for i in range(1, num_steps + 1):
+            t = i / num_steps
+
+            interp_position = [
+                current_position[0] + t * (target_position[0] - current_position[0]),
+                current_position[1] + t * (target_position[1] - current_position[1]),
+                current_position[2] + t * (target_position[2] - current_position[2]),
+            ]
+
+            interp_euler = [
+                current_euler[0] + t * (target_euler[0] - current_euler[0]),
+                current_euler[1] + t * (target_euler[1] - current_euler[1]),
+                current_euler[2] + t * (target_euler[2] - current_euler[2]),
+            ]
+
+            waypoint = {"position": interp_position, "euler": interp_euler}
+            cartesian_waypoints.append(waypoint)
+
+            ik_result = ik_solver.solve(waypoint, seed)
+
+            if not ik_result.get("success", False):
+                return jsonify({
+                    "error": f"IK failed at waypoint {i}/{num_steps}",
+                    "waypoint": waypoint,
+                    "success": False,
+                    "failed_at_step": i,
+                }), 400
+
+            joint_trajectory.append(ik_result["joints"])
+            seed = ik_result["joints"]
+
+        return jsonify({
+            "success": True,
+            "steps": num_steps,
+            "start_position": current_position,
+            "end_position": target_position,
+            "cartesian_waypoints": cartesian_waypoints,
+            "joint_trajectory": joint_trajectory,
+            "final_joints": joint_trajectory[-1] if joint_trajectory else None,
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Linear preview failed: {str(e)}", "success": False}), 500

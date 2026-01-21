@@ -741,9 +741,12 @@ class CanDriver():
                 servo.run_motor_relative_motion_by_axis(offset_speed, 150, int(homing_offset))
                 while servo.is_motor_running():
                     time.sleep(0.05)
-            
+
+            # Set current position as zero (after offset is applied)
+            time.sleep(0.1)  # Brief delay to ensure motor is settled
             servo.set_current_axis_to_zero()
-            logger.info(f"Successfully homed joint {joint_idx}")
+            time.sleep(0.05)  # Allow command to be processed
+            logger.info(f"Successfully homed joint {joint_idx} - position set to zero")
             
         except Exception as e:
             logger.error(f"Failed to home joint {joint_idx}: {e}")
@@ -849,9 +852,13 @@ class CanDriver():
             time.sleep(0.1)
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
+
+        # Set current positions as zero (after offset is applied)
+        time.sleep(0.1)  # Brief delay to ensure motors are settled
         servo5.set_current_axis_to_zero()
         servo6.set_current_axis_to_zero()
-        logger.info("Joint 4 homing completed successfully")
+        time.sleep(0.05)  # Allow commands to be processed
+        logger.info("Joint 4 homing completed successfully - positions set to zero")
         
     def _home_joint_5_same_direction(self) -> None:
         """Homing sequence for joint 5 (motor 6) - Same direction strategy.
@@ -938,10 +945,13 @@ class CanDriver():
             # Wait for both to complete
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
-                
+
+        # Set current positions as zero (after offset is applied)
+        time.sleep(0.1)  # Brief delay to ensure motors are settled
         servo5.set_current_axis_to_zero()
         servo6.set_current_axis_to_zero()
-        logger.info("Joint 5 homing completed successfully")
+        time.sleep(0.05)  # Allow commands to be processed
+        logger.info("Joint 5 homing completed successfully - positions set to zero")
 
 
                 
