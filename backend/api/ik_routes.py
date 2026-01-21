@@ -67,10 +67,13 @@ def linear_move():
     """Execute a linear (straight-line) interpolated movement in Cartesian space.
 
     This endpoint computes waypoints along a straight line from current position
-    to target position, solves IK for each waypoint, and executes them sequentially.
+    to target position, solves IK for each waypoint, and executes them as a fluid
+    trajectory by streaming position updates at regular intervals.
     """
     from flask import current_app
-    from core.motion_service import JointCommand
+    import threading
+    import time
+    import math
 
     try:
         data = request.get_json(silent=True)
@@ -81,7 +84,7 @@ def linear_move():
         return jsonify({"error": "No data"}), 400
 
     target_pose = data.get("pose")
-    num_steps = data.get("steps", 10)  # Number of interpolation steps
+    num_steps = data.get("steps", 20)  # Number of interpolation steps
     duration_s = data.get("duration_s", 2.0)  # Total duration for the move
 
     if not target_pose:
@@ -117,7 +120,7 @@ def linear_move():
 
         # Generate interpolated waypoints
         waypoints = []
-        step_duration = duration_s / num_steps
+        joint_trajectory = []
 
         for i in range(1, num_steps + 1):
             t = i / num_steps  # Interpolation parameter [0, 1]
@@ -142,7 +145,6 @@ def linear_move():
             })
 
         # Solve IK for each waypoint
-        joint_trajectory = []
         seed = current_joints
 
         for i, waypoint in enumerate(waypoints):
@@ -158,14 +160,60 @@ def linear_move():
             joint_trajectory.append(ik_result["joints"])
             seed = ik_result["joints"]  # Use solution as seed for next waypoint
 
-        # Enqueue all joint commands
-        for joints in joint_trajectory:
-            cmd = JointCommand(q=joints, duration_s=step_duration)
-            motion_service.enqueue(cmd)
+        # Execute trajectory by streaming position commands in a background thread
+        driver = motion_service.driver
+
+        def execute_trajectory():
+            """Stream position commands to follow the joint trajectory smoothly.
+
+            Instead of waiting for each waypoint to complete, we continuously
+            send position updates at fixed intervals with maximum acceleration.
+            This creates fluid motion because motors smoothly transition to each
+            new target without easing between waypoints.
+            """
+            dt = duration_s / num_steps  # Time between waypoints
+
+            for i, target_joints in enumerate(joint_trajectory):
+                # Compute required speed for each motor to reach next waypoint in time
+                if i > 0:
+                    prev_joints = joint_trajectory[i - 1]
+                else:
+                    prev_joints = current_joints
+
+                # Calculate max angular distance for this segment
+                max_delta = 0.0
+                for j in range(len(target_joints)):
+                    prev = prev_joints[j] if j < len(prev_joints) else 0.0
+                    delta = abs(target_joints[j] - prev)
+                    if delta > max_delta:
+                        max_delta = delta
+
+                # Calculate speed needed (rad/s -> RPM) with margin
+                if max_delta > 0 and dt > 0:
+                    required_rad_s = max_delta / dt
+                    required_rpm = int((required_rad_s * 60.0) / (2.0 * math.pi))
+                    # Add 50% margin to ensure we can keep up
+                    speed_rpm = max(50, min(int(required_rpm * 1.5), 500))
+                else:
+                    speed_rpm = 200
+
+                # Use send_trajectory_point for max acceleration (fluid motion)
+                if hasattr(driver, 'send_trajectory_point'):
+                    driver.send_trajectory_point(target_joints, speed_rpm=speed_rpm)
+                else:
+                    # Fallback to regular method
+                    driver.send_joint_targets(target_joints)
+
+                # Wait for the segment duration before sending next waypoint
+                time.sleep(dt)
+
+        # Start trajectory execution in background
+        trajectory_thread = threading.Thread(target=execute_trajectory, daemon=True)
+        trajectory_thread.start()
 
         return jsonify({
             "success": True,
-            "status": "linear move queued",
+            "status": "linear move started (position streaming)",
             "steps": num_steps,
             "duration_s": duration_s,
             "start_position": current_position,

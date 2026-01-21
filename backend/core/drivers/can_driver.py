@@ -1193,11 +1193,63 @@ class CanDriver():
                 if not future.done():
                     future.cancel()
                     cancelled_count += 1
-            
+
             if cancelled_count > 0:
                 logger.debug(f"Cancelled {cancelled_count} pending futures")
-            
+
             self.pending_futures = []
+
+    def send_trajectory_point(self, q: List[float], speed_rpm: Optional[int] = None) -> None:
+        """Send a single trajectory point with maximum acceleration for fluid motion.
+
+        This method is designed for trajectory streaming where we want minimal
+        easing between waypoints. It uses maximum acceleration (255) and allows
+        commands to be sent while motors are still moving.
+
+        Args:
+            q: List of joint angles in radians [joint0, joint1, ..., joint5]
+            speed_rpm: Optional speed override. If None, uses motor config speed.
+        """
+        if self.bus is None:
+            logger.warning("CAN bus not initialized.")
+            return
+
+        with self._servo_lock:
+            if not self.servos:
+                logger.warning("Servos not enabled.")
+                return
+
+        if len(q) != 6:
+            logger.error(f"Expected 6 joint angles, got {len(q)}")
+            return
+
+        # Transform joint angles to motor angles (handles coupled mode)
+        motor_commands = self.joints_to_motors(list(q))
+
+        # Use maximum acceleration for minimal easing
+        max_acceleration = 255
+
+        with self._servo_lock:
+            for motor_id, angle_rad in motor_commands.items():
+                if motor_id >= len(self.servos):
+                    continue
+
+                try:
+                    encoder_val = self.angle_to_encoder(angle_rad, motor_id)
+
+                    # Use provided speed or motor config speed
+                    if speed_rpm is not None:
+                        speed = abs(speed_rpm)
+                    else:
+                        motor_config = self.get_motor_config(motor_id)
+                        speed = abs(motor_config['speed_rpm'])
+
+                    # Send command with max acceleration - don't wait for motor to stop
+                    self.servos[motor_id].run_motor_absolute_motion_by_axis(
+                        speed, max_acceleration, encoder_val
+                    )
+                except Exception as e:
+                    logger.debug(f"Error sending trajectory point to motor {motor_id}: {e}")
 
     def send_can_message_gripper(self, arbitration_id: int, data: List[int]) -> None:
         """
