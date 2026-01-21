@@ -846,6 +846,10 @@ class CanDriver():
         servo6.stop_motor_in_speed_mode(255)
         time.sleep(0.2)
 
+        # Wait for motors to actually stop before starting offset motion
+        while servo5.is_motor_running() or servo6.is_motor_running():
+            time.sleep(0.05)
+
         if not limit_hit:
             logger.warning("Timeout waiting for motor 5 endstop")
 
