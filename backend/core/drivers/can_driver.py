@@ -782,27 +782,39 @@ class CanDriver():
         logger.info("Homing joint 4 using opposite-directions method")
 
         # Get servo instances
-        servo5 = self.servos[4]
-        servo6 = self.servos[5]
+        servo5 = self.servos[4]  # Motor 5 (joint index 4)
+        servo6 = self.servos[5]  # Motor 6 (joint index 5)
 
         # Get motor configurations
-        config5 = self.get_motor_config(4)
-        config6 = self.get_motor_config(5)
+        config5 = self.get_motor_config(4)  # Motor 5
+        config6 = self.get_motor_config(5)  # Motor 6
 
         # Get homing parameters
         offset5 = config5.get("homing_offset", 25000)
-        offset_speed = max(abs(config5.get("offset_speed", 80)), abs(config6.get("offset_speed", 80)))
-        coord_speed = max(config5.get("home_speed", 80), config6.get("home_speed", 80))
+        logger.info(f"offset5: {offset5}")
+
+        # Get homing speeds and directions from motor configs
+        offset_speed5 = abs(config5.get("offset_speed", 80))
+        offset_speed6 = abs(config6.get("offset_speed", 80))
+        home_speed5 = config5.get("home_speed", 80)
+        home_speed6 = config6.get("home_speed", 80)
         home_dir_5 = config5.get("home_direction", "CCW")
+
+        # Use the higher speed for coordinated movements
+        coord_speed = max(home_speed5, home_speed6)
+        offset_speed = max(offset_speed5, offset_speed6)
 
         logger.info(f"Joint 4 homing: speed={coord_speed}, offset={offset5}")
 
         # Phase 1: Move both motors in OPPOSITE directions until motor 5's endstop is hit
-        logger.info("Phase 1: Moving motors in opposite directions until motor 5 endstop...")
+        logger.info("Phase 1: Moving both motors in opposite directions until motor 5 endstop...")
+
+        # Determine direction - motor 5's homing direction
         from .mks_servo_can.mks_enums import Direction
         direction_5 = Direction.CCW if home_dir_5.upper() == "CCW" else Direction.CW
         direction_6_opposite = Direction.CW if direction_5 == Direction.CCW else Direction.CCW
 
+        # Start both motors in opposite directions
         servo5.run_motor_in_speed_mode(direction_5, coord_speed, 150)
         servo6.run_motor_in_speed_mode(direction_6_opposite, coord_speed, 150)
 
@@ -813,14 +825,18 @@ class CanDriver():
 
         while not limit_hit and (time.time() - start_time) < max_wait_time:
             try:
-                io_status = servo5.read_io_port_status()
+                io_status = servo5.read_io_port_status()  # Check motor 5's endstop
                 if io_status is not None:
                     limit1_triggered = bool(io_status & 0x01)
+                    # Assuming Low level endstop
                     limit_hit = not limit1_triggered
+
                     if limit_hit:
                         logger.info(f"Motor 5 endstop triggered (IO: 0x{io_status:02X})")
                         break
+
                 time.sleep(0.05)
+
             except Exception as e:
                 logger.warning(f"Error reading motor 5 IO status: {e}")
                 time.sleep(0.05)
@@ -835,20 +851,20 @@ class CanDriver():
 
         # Phase 2: Move both motors by motor 5's offset amount
         if offset5 != 0:
-            logger.info(f"Phase 2: Moving both motors by offset ({offset5}) at speed {offset_speed}...")
+            logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
             servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
-            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset5)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
+            # Wait for both to complete
             time.sleep(0.1)
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
-            logger.info("Offset motion completed")
 
-        # Phase 3: Set current positions as zero (with retries and verification)
-        time.sleep(0.1)
-        result5 = servo5.set_current_axis_to_zero()
-        result6 = servo6.set_current_axis_to_zero()
-        logger.info(f"Joint 4 homing - servo5 zero result: {result5}, servo6 zero result: {result6}")
-        logger.info("Joint 4 homing completed - positions set to zero")
+        # Set current positions as zero (after offset is applied)
+        time.sleep(0.1)  # Brief delay to ensure motors are settled
+        servo5.set_current_axis_to_zero()
+        servo6.set_current_axis_to_zero()
+        time.sleep(0.05)  # Allow commands to be processed
+        logger.info("Joint 4 homing completed successfully - positions set to zero")
 
     def _home_joint_5_same_direction(self) -> None:
         """Homing sequence for joint 5 (motor 6) - Same direction strategy.
@@ -858,23 +874,35 @@ class CanDriver():
         logger.info("Homing joint 5 using same-direction method")
 
         # Get servo instances
-        servo5 = self.servos[4]
-        servo6 = self.servos[5]
+        servo5 = self.servos[4]  # Motor 5 (joint index 4)
+        servo6 = self.servos[5]  # Motor 6 (joint index 5)
 
         # Get motor configurations
-        config5 = self.get_motor_config(4)
-        config6 = self.get_motor_config(5)
+        config5 = self.get_motor_config(4)  # Motor 5
+        config6 = self.get_motor_config(5)  # Motor 6
 
         # Get homing parameters
         offset6 = config6.get("homing_offset", 20000)
-        offset_speed = max(abs(config5.get("offset_speed", 80)), abs(config6.get("offset_speed", 80)))
-        coord_speed = max(config5.get("home_speed", 80), config6.get("home_speed", 80))
+
+        # Get homing speeds and directions from motor configs
+        offset_speed5 = abs(config5.get("offset_speed", 80))
+        offset_speed6 = abs(config6.get("offset_speed", 80))
+        home_speed5 = config5.get("home_speed", 80)
+        home_speed6 = config6.get("home_speed", 80)
         home_dir_6 = config6.get("home_direction", "CCW")
+
+        # Use the higher speed for coordinated movements
+        coord_speed = max(home_speed5, home_speed6)
+        offset_speed = max(offset_speed5, offset_speed6)
 
         logger.info(f"Joint 5 homing: speed={coord_speed}, offset={offset6}")
 
-        # Phase 1: Move both motors in SAME direction until motor 6's endstop is hit
+        # Move both motors in SAME direction until motor 6's endstop is hit
         logger.info("Moving both motors in same direction until motor 6 endstop...")
+        max_wait_time = 30.0
+        start_time = time.time()
+
+        # Motor 6 in its homing direction, motor 5 in same direction
         from .mks_servo_can.mks_enums import Direction
         dir_6 = Direction.CCW if home_dir_6.upper() == "CCW" else Direction.CW
 
@@ -883,24 +911,24 @@ class CanDriver():
 
         # Wait for motor 6's limit switch
         limit_hit = False
-        max_wait_time = 30.0
-        start_time = time.time()
-
         while not limit_hit and (time.time() - start_time) < max_wait_time:
             try:
-                io_status = servo6.read_io_port_status()
+                io_status = servo6.read_io_port_status()  # Check motor 6's endstop
                 if io_status is not None:
                     limit1_triggered = bool(io_status & 0x01)
+                    # Assuming Low level endstop
                     limit_hit = not limit1_triggered
+
                     if limit_hit:
                         logger.info(f"Motor 6 endstop triggered (IO: 0x{io_status:02X})")
                         break
+
                 time.sleep(0.05)
+
             except Exception as e:
                 logger.warning(f"Error reading motor 6 IO status: {e}")
                 time.sleep(0.05)
 
-        # Stop both motors
         servo5.stop_motor_in_speed_mode(255)
         servo6.stop_motor_in_speed_mode(255)
         time.sleep(0.2)
@@ -908,28 +936,27 @@ class CanDriver():
         if not limit_hit:
             logger.warning("Timeout waiting for motor 6 endstop")
 
-        # Phase 2: Apply offset if configured
+        # Apply offset if configured
         if offset6 != 0:
-            logger.info(f"Phase 2: Moving both motors by offset ({offset6}) at speed {offset_speed}...")
-            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
-            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
+            logger.info(f"Phase 2: Moving both motors by motor 6 offset ({offset6}) at speed {offset_speed}...")
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1* offset6)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 *offset6)
             time.sleep(0.2)
             # Wait for both to start moving
-            start_timeout = 2.0
+            start_timeout = 2.0  # seconds
             start_time = time.time()
             while not (servo5.is_motor_running() and servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
                 time.sleep(0.01)
             # Wait for both to complete
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
-            logger.info("Offset motion completed")
 
-        # Phase 3: Set current positions as zero (with retries and verification)
-        time.sleep(0.1)
-        result5 = servo5.set_current_axis_to_zero()
-        result6 = servo6.set_current_axis_to_zero()
-        logger.info(f"Joint 5 homing - servo5 zero result: {result5}, servo6 zero result: {result6}")
-        logger.info("Joint 5 homing completed - positions set to zero")
+        # Set current positions as zero (after offset is applied)
+        time.sleep(0.1)  # Brief delay to ensure motors are settled
+        servo5.set_current_axis_to_zero()
+        servo6.set_current_axis_to_zero()
+        time.sleep(0.05)  # Allow commands to be processed
+        logger.info("Joint 5 homing completed successfully - positions set to zero")
 
 
     def _home_motors_5_and_6(self) -> None:

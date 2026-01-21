@@ -489,12 +489,9 @@ def wait_for_go_home(self, timeout=None):
     return self._homing_status
 
 
-def set_current_axis_to_zero(self, max_retries: int = 3):
+def set_current_axis_to_zero(self):
     """
     Sets current axis to zero. It is like "go_home" without running the motor.
-
-    Args:
-        max_retries: Maximum number of retries if the command fails or encoder doesn't reset.
 
     Returns:
         SuccessStatus: The success result of the command.
@@ -502,47 +499,7 @@ def set_current_axis_to_zero(self, max_retries: int = 3):
     Raises:
         can.CanError: If there is an error in sending the CAN message.
     """
-    from .can_commands import read_encoder_value_addition
-
-    # Temporarily increase timeout for this command as it may take longer
-    original_timeout = self.timeout
-    self.timeout = 0.5  # 500ms timeout
-
-    try:
-        for attempt in range(max_retries):
-            # Read encoder before
-            encoder_before = read_encoder_value_addition(self)
-            logging.debug(f"Servo {self.can_id}: encoder before zeroing (attempt {attempt+1}): {encoder_before}")
-
-            # Send the zero command
-            result = self.set_generic_status(MksCommands.SET_CURRENT_AXIS_TO_ZERO_COMMAND)
-            logging.debug(f"Servo {self.can_id}: set_current_axis_to_zero returned: {result}")
-
-            if result != SuccessStatus.Success:
-                logging.warning(f"Servo {self.can_id}: set_current_axis_to_zero failed (attempt {attempt+1}/{max_retries}): {result}")
-                time.sleep(0.1)
-                continue
-
-            # Wait for servo to process the command
-            time.sleep(0.15)
-
-            # Verify encoder is now zero (or close to it)
-            encoder_after = read_encoder_value_addition(self)
-            logging.debug(f"Servo {self.can_id}: encoder after zeroing (attempt {attempt+1}): {encoder_after}")
-
-            if encoder_after is not None and abs(encoder_after) <= 100:
-                logging.info(f"Servo {self.can_id}: successfully zeroed encoder (was {encoder_before}, now {encoder_after})")
-                return result
-            else:
-                logging.warning(f"Servo {self.can_id}: encoder did not reset (was {encoder_before}, now {encoder_after}), retrying...")
-                time.sleep(0.1)
-
-        # All retries exhausted
-        logging.error(f"Servo {self.can_id}: failed to zero encoder after {max_retries} attempts")
-        return result
-
-    finally:
-        self.timeout = original_timeout
+    return self.set_generic_status(MksCommands.SET_CURRENT_AXIS_TO_ZERO_COMMAND)
 
 
 def set_limit_port_remap(self, enable: Enable):
