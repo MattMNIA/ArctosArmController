@@ -849,11 +849,11 @@ class CanDriver():
         if not limit_hit:
             logger.warning("Timeout waiting for motor 5 endstop")
 
-        # Phase 2: Move both motors by motor 5's offset amount
+        # Phase 2: Move both motors by motor 5's offset amount (opposite directions)
         if offset5 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
-            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
-            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
             # Wait for both to complete
             time.sleep(0.1)
             while servo5.is_motor_running() or servo6.is_motor_running():
