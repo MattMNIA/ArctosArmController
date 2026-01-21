@@ -192,28 +192,38 @@ if __name__ == "__main__":
             while True:
                 time.sleep(1.0)
         except KeyboardInterrupt:
-            print("Shutting down...")
-        finally:
-            print("Stopping teleoperation...")
+            print("\nShutting down...")
+
+        # Use a timeout thread to force exit if graceful shutdown hangs
+        import os
+        def force_exit():
+            time.sleep(5.0)
+            print("Shutdown taking too long, forcing exit...")
+            os._exit(0)
+
+        force_exit_thread = threading.Thread(target=force_exit, daemon=True)
+        force_exit_thread.start()
+
+        print("Stopping teleoperation...")
+        try:
+            teleop_manager.stop()
+            print("Teleop manager stopped")
+        except Exception as e:
+            print(f"Error stopping teleop manager: {e}")
+        try:
+            app.config['motion_service'].stop()
+            print("Motion service stopped")
+        except Exception as e:
+            print(f"Error stopping motion service: {e}")
+        if flask_thread and flask_thread.is_alive():
             try:
-                teleop_manager.stop()
-                print("Teleop manager stopped")
+                socketio.stop()
+                print("SocketIO stopped")
             except Exception as e:
-                print(f"Error stopping teleop manager: {e}")
-            try:
-                app.config['motion_service'].stop()
-                print("Motion service stopped")
-            except Exception as e:
-                print(f"Error stopping motion service: {e}")
-            if flask_thread and flask_thread.is_alive():
-                try:
-                    socketio.stop()
-                    print("SocketIO stopped")
-                except Exception as e:
-                    print(f"Error stopping SocketIO: {e}")
-                flask_thread.join(timeout=5.0)
-                print("Flask thread joined")
-            print("Shutdown complete")
+                print(f"Error stopping SocketIO: {e}")
+            flask_thread.join(timeout=2.0)
+            print("Flask thread joined")
+        print("Shutdown complete")
     else:
         # Run Flask server normally
         print("Starting Flask server without teleoperation...")

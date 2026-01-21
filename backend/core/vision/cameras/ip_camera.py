@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 import cv2
+import numpy as np
 import requests
 
 from .camera_base import CameraBase
@@ -15,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 class IPCamera(CameraBase):
-    """Handles IP camera capture and configuration via the ESP32 camera API."""
+    """Handles IP camera capture and configuration via the ESP32 camera API.
+
+    Uses a background thread to continuously grab frames, ensuring the latest
+    frame is always available without blocking and reducing latency.
+    """
 
     def __init__(
         self,
@@ -32,6 +38,21 @@ class IPCamera(CameraBase):
             self._session.close()
             raise RuntimeError(f"Failed to open IP camera at {url}.")
 
+        # Set buffer size to minimum to reduce latency
+        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        # Background frame grabbing for reduced latency
+        self._frame_lock = threading.Lock()
+        self._latest_frame: Optional[np.ndarray] = None
+        self._frame_available = False
+        self._stop_event = threading.Event()
+        self._grab_thread = threading.Thread(
+            target=self._grab_frames_loop,
+            daemon=True,
+            name="ip-camera-grab"
+        )
+        self._grab_thread.start()
+
     def _derive_control_base_url(self, control_base_url: Optional[str]) -> str:
         if control_base_url:
             return control_base_url.rstrip("/")
@@ -44,21 +65,57 @@ class IPCamera(CameraBase):
         return f"{parsed.scheme}://{parsed.hostname}"
 
     # ------------------------------------------------------------------
-    # Video capture primitives
-    def read(self):
-        """Read a frame from the camera."""
-        return self._capture.read()
+    # Background frame grabbing
+    def _grab_frames_loop(self) -> None:
+        """Continuously grab frames in background to keep buffer fresh."""
+        while not self._stop_event.is_set():
+            if not self._capture or not self._capture.isOpened():
+                break
+            try:
+                ret, frame = self._capture.read()
+                if ret and frame is not None:
+                    with self._frame_lock:
+                        self._latest_frame = frame
+                        self._frame_available = True
+                else:
+                    # Brief sleep on failure to avoid spinning
+                    time.sleep(0.01)
+            except Exception as e:
+                logger.debug("Frame grab error: %s", e)
+                time.sleep(0.01)
 
-    def release(self):
+    # ------------------------------------------------------------------
+    # Video capture primitives
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        """Read the latest frame from the camera (non-blocking).
+
+        Returns the most recent frame captured by the background thread,
+        ensuring minimal latency.
+        """
+        with self._frame_lock:
+            if self._frame_available and self._latest_frame is not None:
+                # Return a copy to avoid race conditions
+                frame = self._latest_frame.copy()
+                return True, frame
+            return False, None
+
+    def release(self) -> None:
         """Release the camera capture and HTTP session."""
+        # Signal the grab thread to stop
+        self._stop_event.set()
+
+        # Wait briefly for thread to finish (don't block forever)
+        if self._grab_thread and self._grab_thread.is_alive():
+            self._grab_thread.join(timeout=0.5)
+
         if self._capture and self._capture.isOpened():
             self._capture.release()
         if self._session:
             self._session.close()
 
-    def is_opened(self):
+    def is_opened(self) -> bool:
         """Check if the camera is opened."""
-        return self._capture.isOpened()
+        return self._capture is not None and self._capture.isOpened()
 
     def take_picture(self) -> bytes:
         """Trigger the camera to capture a still image and return JPEG bytes."""
