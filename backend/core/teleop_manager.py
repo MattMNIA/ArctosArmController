@@ -22,6 +22,9 @@ class TeleopManagerError(RuntimeError):
 class TeleopManager:
     """Central coordinator for runtime-configurable teleoperation modes."""
 
+    # Modes that support vision display (camera window)
+    _VISION_MODES = {"fingers", "finger-sliders", "object-centering"}
+
     _AVAILABLE_MODES: Dict[str, Dict[str, Any]] = {
         "keyboard": {
             "label": "Keyboard",
@@ -72,7 +75,7 @@ class TeleopManager:
                 "displayFeed": {
                     "type": "boolean",
                     "label": "Show annotated feed",
-                    "default": False,
+                    "default": True,
                 },
                 "invertHorizontal": {
                     "type": "boolean",
@@ -88,7 +91,7 @@ class TeleopManager:
         },
     }
 
-    def __init__(self, motion_service: MotionService) -> None:
+    def __init__(self, motion_service: MotionService, *, show_vision: Optional[bool] = None) -> None:
         self._motion_service = motion_service
         driver = getattr(motion_service, "driver", None)
         if driver is None:
@@ -101,6 +104,8 @@ class TeleopManager:
         self._stop_event = threading.Event()
         self._current_mode: Optional[str] = None
         self._last_error: Optional[str] = None
+        # Global override for vision display (None = use per-mode option, True/False = force)
+        self._show_vision_override: Optional[bool] = show_vision
 
     # ------------------------------------------------------------------
     # Public API
@@ -217,21 +222,27 @@ class TeleopManager:
                 except Exception:  # pragma: no cover - best effort cleanup
                     logger.debug("Error while closing input controller", exc_info=True)
 
+    def _resolve_show_vision(self, mode: str, options: Dict[str, Any], key: str, default: bool) -> bool:
+        """Resolve the vision display setting, applying global override if set."""
+        if self._show_vision_override is not None and mode in self._VISION_MODES:
+            return self._show_vision_override
+        return bool(options.get(key, default))
+
     def _create_input_controller(self, mode: str, options: Dict[str, Any]) -> InputController:
         if mode == "keyboard":
             return KeyboardController()
         if mode == "xbox":
             return XboxController()
         if mode == "fingers":
-            show_window = options.get("showWindow", True)
+            show_window = self._resolve_show_vision(mode, options, "showWindow", True)
             return FingerInputController(show_window=show_window)
         if mode == "finger-sliders":
-            show_window = options.get("showWindow", True)
+            show_window = self._resolve_show_vision(mode, options, "showWindow", True)
             return FingerSliderInput(gesture_update_interval=0.1, show_window=show_window)
         if mode == "object-centering":
             preferred_label = options.get("centerLabel")
             labels = [preferred_label] if preferred_label else None
-            display_feed = bool(options.get("displayFeed", False))
+            display_feed = self._resolve_show_vision(mode, options, "displayFeed", True)
             detector_model = options.get("model") or options.get("detectorModel")
             detector_type = options.get("detectorType", "object")
             invert_horizontal = bool(options.get("invertHorizontal", False))

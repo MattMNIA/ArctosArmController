@@ -43,7 +43,7 @@ socketio = SocketIO(
     ping_interval=25
 )
 
-def create_app(drivers_list):
+def create_app(drivers_list, *, show_vision: bool = None):
     app = Flask(__name__)
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
@@ -110,7 +110,7 @@ def create_app(drivers_list):
     motion_service.ws_emit = emit_event
     motion_service.has_active_connections = has_active_connections
     app.config['motion_service'] = motion_service
-    app.config['teleop_manager'] = TeleopManager(motion_service)
+    app.config['teleop_manager'] = TeleopManager(motion_service, show_vision=show_vision)
 
     # Register blueprints
     app.register_blueprint(ik_bp, url_prefix='/api/ik')
@@ -140,8 +140,8 @@ if __name__ == "__main__":
     parser.add_argument('--teleop', choices=['keyboard', 'xbox', 'fingers', 'finger-sliders', 'object-centering'], help="Enable teleoperation with specified input device")
     parser.add_argument('--center-label', default=None, help="Preferred detection label when using object-centering input")
     parser.add_argument('--yolo-model', default=None, help="YOLO model path/name for object centering")
-    parser.add_argument('--no-show-vision', dest='show_vision', action='store_false', help="Hide the annotated camera feed when using object centering")
-    parser.set_defaults(show_vision=True)
+    parser.add_argument('--show-vision', dest='show_vision', action='store_true', default=None, help="Show the camera feed window for vision-based teleop modes")
+    parser.add_argument('--no-show-vision', dest='show_vision', action='store_false', help="Hide the camera feed window for vision-based teleop modes")
     parser.add_argument('--invert-horizontal', action='store_true', help="Invert horizontal centering direction")
     parser.add_argument('--invert-vertical', action='store_true', help="Invert vertical centering direction")
     args = parser.parse_args()
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     if teleop_mode is None and xbox_available:
         teleop_mode = 'xbox'
     
-    app = create_app(args.drivers)
+    app = create_app(args.drivers, show_vision=args.show_vision)
     
     if teleop_mode:
         # Start Flask server in a separate thread
