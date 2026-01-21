@@ -849,22 +849,18 @@ class CanDriver():
         if not limit_hit:
             logger.warning("Timeout waiting for motor 5 endstop")
 
-        # Phase 2: Move both motors by motor 5's offset amount (opposite directions)
+        # Phase 2: Move both motors by motor 5's offset amount
         if offset5 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
-            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
-            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
             # Wait for both to complete
             time.sleep(0.1)
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
-
-        # Set current positions as zero (after offset is applied)
-        time.sleep(0.1)  # Brief delay to ensure motors are settled
         servo5.set_current_axis_to_zero()
         servo6.set_current_axis_to_zero()
-        time.sleep(0.05)  # Allow commands to be processed
-        logger.info("Joint 4 homing completed successfully - positions set to zero")
+        logger.info("Joint 4 homing completed successfully")
 
     def _home_joint_5_same_direction(self) -> None:
         """Homing sequence for joint 5 (motor 6) - Same direction strategy.
@@ -947,16 +943,14 @@ class CanDriver():
             start_time = time.time()
             while not (servo5.is_motor_running() and servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
                 time.sleep(0.01)
+
             # Wait for both to complete
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
 
-        # Set current positions as zero (after offset is applied)
-        time.sleep(0.1)  # Brief delay to ensure motors are settled
         servo5.set_current_axis_to_zero()
         servo6.set_current_axis_to_zero()
-        time.sleep(0.05)  # Allow commands to be processed
-        logger.info("Joint 5 homing completed successfully - positions set to zero")
+        logger.info("Joint 5 homing completed successfully")
 
 
     def _home_motors_5_and_6(self) -> None:
