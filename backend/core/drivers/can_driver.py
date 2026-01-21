@@ -743,10 +743,30 @@ class CanDriver():
                     time.sleep(0.05)
 
             # Set current position as zero (after offset is applied)
-            time.sleep(0.1)  # Brief delay to ensure motor is settled
-            servo.set_current_axis_to_zero()
-            time.sleep(0.05)  # Allow command to be processed
-            logger.info(f"Successfully homed joint {joint_idx} - position set to zero")
+            time.sleep(0.2)  # Ensure motor is fully settled before setting zero
+
+            # Read encoder before zeroing for comparison
+            encoder_before = servo.read_encoder_value_addition()
+            logger.info(f"Joint {joint_idx}: encoder value before zeroing: {encoder_before}")
+
+            result = servo.set_current_axis_to_zero()
+            if result is None:
+                logger.error(f"Joint {joint_idx}: set_current_axis_to_zero() returned None - command may have timed out")
+            elif result.value == 1:  # SuccessStatus.Success
+                logger.info(f"Joint {joint_idx}: set_current_axis_to_zero() succeeded")
+            else:
+                logger.error(f"Joint {joint_idx}: set_current_axis_to_zero() returned {result}")
+
+            time.sleep(0.1)  # Allow servo to process the zero command
+
+            # Verify the position was actually set to zero by reading the encoder
+            encoder_after = servo.read_encoder_value_addition()
+            logger.info(f"Joint {joint_idx}: encoder value after zeroing: {encoder_after}")
+
+            if encoder_after != 0 and encoder_after is not None:
+                logger.warning(f"Joint {joint_idx}: encoder did not reset to 0 (got {encoder_after})")
+
+            logger.info(f"Successfully homed joint {joint_idx}")
             
         except Exception as e:
             logger.error(f"Failed to home joint {joint_idx}: {e}")
@@ -854,11 +874,39 @@ class CanDriver():
                 time.sleep(0.05)
 
         # Set current positions as zero (after offset is applied)
-        time.sleep(0.1)  # Brief delay to ensure motors are settled
-        servo5.set_current_axis_to_zero()
-        servo6.set_current_axis_to_zero()
-        time.sleep(0.05)  # Allow commands to be processed
-        logger.info("Joint 4 homing completed successfully - positions set to zero")
+        time.sleep(0.2)  # Ensure motors are fully settled before setting zero
+
+        # Read encoders before zeroing for comparison
+        encoder5_before = servo5.read_encoder_value_addition()
+        encoder6_before = servo6.read_encoder_value_addition()
+        logger.info(f"Motor 5 encoder before zeroing: {encoder5_before}")
+        logger.info(f"Motor 6 encoder before zeroing: {encoder6_before}")
+
+        result5 = servo5.set_current_axis_to_zero()
+        result6 = servo6.set_current_axis_to_zero()
+        if result5 is None or (hasattr(result5, 'value') and result5.value != 1):
+            logger.error(f"Motor 5: set_current_axis_to_zero() failed with result {result5}")
+        else:
+            logger.info(f"Motor 5: set_current_axis_to_zero() succeeded")
+        if result6 is None or (hasattr(result6, 'value') and result6.value != 1):
+            logger.error(f"Motor 6: set_current_axis_to_zero() failed with result {result6}")
+        else:
+            logger.info(f"Motor 6: set_current_axis_to_zero() succeeded")
+
+        time.sleep(0.1)  # Allow servos to process the zero commands
+
+        # Verify the positions were actually set to zero
+        encoder5_after = servo5.read_encoder_value_addition()
+        encoder6_after = servo6.read_encoder_value_addition()
+        logger.info(f"Motor 5 encoder after zeroing: {encoder5_after}")
+        logger.info(f"Motor 6 encoder after zeroing: {encoder6_after}")
+
+        if encoder5_after != 0 and encoder5_after is not None:
+            logger.warning(f"Motor 5: encoder did not reset to 0 (got {encoder5_after})")
+        if encoder6_after != 0 and encoder6_after is not None:
+            logger.warning(f"Motor 6: encoder did not reset to 0 (got {encoder6_after})")
+
+        logger.info("Joint 4 homing completed successfully")
         
     def _home_joint_5_same_direction(self) -> None:
         """Homing sequence for joint 5 (motor 6) - Same direction strategy.
@@ -947,11 +995,39 @@ class CanDriver():
                 time.sleep(0.05)
 
         # Set current positions as zero (after offset is applied)
-        time.sleep(0.1)  # Brief delay to ensure motors are settled
-        servo5.set_current_axis_to_zero()
-        servo6.set_current_axis_to_zero()
-        time.sleep(0.05)  # Allow commands to be processed
-        logger.info("Joint 5 homing completed successfully - positions set to zero")
+        time.sleep(0.2)  # Ensure motors are fully settled before setting zero
+
+        # Read encoders before zeroing for comparison
+        encoder5_before = servo5.read_encoder_value_addition()
+        encoder6_before = servo6.read_encoder_value_addition()
+        logger.info(f"Motor 5 encoder before zeroing: {encoder5_before}")
+        logger.info(f"Motor 6 encoder before zeroing: {encoder6_before}")
+
+        result5 = servo5.set_current_axis_to_zero()
+        result6 = servo6.set_current_axis_to_zero()
+        if result5 is None or (hasattr(result5, 'value') and result5.value != 1):
+            logger.error(f"Motor 5: set_current_axis_to_zero() failed with result {result5}")
+        else:
+            logger.info(f"Motor 5: set_current_axis_to_zero() succeeded")
+        if result6 is None or (hasattr(result6, 'value') and result6.value != 1):
+            logger.error(f"Motor 6: set_current_axis_to_zero() failed with result {result6}")
+        else:
+            logger.info(f"Motor 6: set_current_axis_to_zero() succeeded")
+
+        time.sleep(0.1)  # Allow servos to process the zero commands
+
+        # Verify the positions were actually set to zero
+        encoder5_after = servo5.read_encoder_value_addition()
+        encoder6_after = servo6.read_encoder_value_addition()
+        logger.info(f"Motor 5 encoder after zeroing: {encoder5_after}")
+        logger.info(f"Motor 6 encoder after zeroing: {encoder6_after}")
+
+        if encoder5_after != 0 and encoder5_after is not None:
+            logger.warning(f"Motor 5: encoder did not reset to 0 (got {encoder5_after})")
+        if encoder6_after != 0 and encoder6_after is not None:
+            logger.warning(f"Motor 6: encoder did not reset to 0 (got {encoder6_after})")
+
+        logger.info("Joint 5 homing completed successfully")
 
 
                 

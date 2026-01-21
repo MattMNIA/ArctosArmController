@@ -499,7 +499,14 @@ def set_current_axis_to_zero(self):
     Raises:
         can.CanError: If there is an error in sending the CAN message.
     """
-    return self.set_generic_status(MksCommands.SET_CURRENT_AXIS_TO_ZERO_COMMAND)
+    # Temporarily increase timeout for this command as it may take longer
+    original_timeout = self.timeout
+    self.timeout = 0.5  # 500ms timeout
+    try:
+        result = self.set_generic_status(MksCommands.SET_CURRENT_AXIS_TO_ZERO_COMMAND)
+        return result
+    finally:
+        self.timeout = original_timeout
 
 
 def set_limit_port_remap(self, enable: Enable):
