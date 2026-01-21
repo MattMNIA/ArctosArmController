@@ -27,7 +27,6 @@ import threading
 import time
 
 import argparse
-import signal
 import sys
 
 # URDF path - use Path for cross-platform compatibility
@@ -48,15 +47,7 @@ def create_app(drivers_list, *, show_vision: bool = None):
     CORS(app)  # Enable CORS for all routes
     socketio.init_app(app)
     logger = logging.getLogger(__name__)
-    
-    # Set up signal handler for graceful shutdown
-    def signal_handler(signum, frame):
-        logger.info("Received signal %d, shutting down...", signum)
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Initialize IK Solver first (always present)
     ik_solver = None
     gui = 'pybullet' in drivers_list
