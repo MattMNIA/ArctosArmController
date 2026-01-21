@@ -239,22 +239,24 @@ class FingerSliderStrategy:
         return events
 
     def close(self) -> None:
-        # Close resources without blocking on lock (shutdown path)
-        # Close MediaPipe Hands with proper error handling
+        # Release camera first to unblock any pending read() calls
+        camera = self._camera
+        self._camera = None
+        if camera is not None:
+            try:
+                # Access underlying capture directly to force unblock
+                if hasattr(camera, '_capture') and camera._capture is not None:
+                    camera._capture.release()
+                camera.release()
+            except Exception:
+                pass
+
+        # Close MediaPipe Hands
         hands = self._hands
         self._hands = None
         if hands is not None:
             try:
                 hands.close()
-            except Exception:
-                pass
-
-        # Release camera
-        camera = self._camera
-        self._camera = None
-        if camera is not None:
-            try:
-                camera.release()
             except Exception:
                 pass
 
