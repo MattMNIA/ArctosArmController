@@ -23,11 +23,11 @@ from core.motion_service import MotionService
 from core.ik.analytic import AnalyticIKSolver
 from core.teleop_manager import TeleopManager, TeleopManagerError
 import utils.logger  # Import to trigger logging setup
+import argparse
+import os
+import sys
 import threading
 import time
-
-import argparse
-import sys
 
 # URDF path - use Path for cross-platform compatibility
 URDF_PATH = Path(__file__).parent / "models" / "urdf" / "arctos_urdf.urdf"
@@ -189,20 +189,6 @@ if __name__ == "__main__":
 
         print("Teleoperation enabled. Press Ctrl+C to exit.")
 
-        # Prepare force-exit mechanism
-        import os
-        shutdown_initiated = threading.Event()
-
-        def force_exit_after_delay():
-            # Wait for shutdown to be initiated
-            shutdown_initiated.wait()
-            time.sleep(3.0)
-            print("\nShutdown taking too long, forcing exit...")
-            os._exit(0)
-
-        force_exit_thread = threading.Thread(target=force_exit_after_delay, daemon=True)
-        force_exit_thread.start()
-
         # Teleop loop runs in background thread, wait for Ctrl+C
         try:
             while True:
@@ -210,27 +196,16 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             pass  # Fall through to shutdown
 
-        # Signal force-exit thread that shutdown has started
-        shutdown_initiated.set()
+        # Start force-exit timer immediately when Ctrl+C is pressed
+        def force_exit():
+            time.sleep(2.0)
+            os._exit(0)
+
+        threading.Thread(target=force_exit, daemon=True).start()
+
         print("\nShutting down...")
-        try:
-            teleop_manager.stop()
-            print("Teleop manager stopped")
-        except Exception as e:
-            print(f"Error stopping teleop manager: {e}")
-        try:
-            app.config['motion_service'].stop()
-            print("Motion service stopped")
-        except Exception as e:
-            print(f"Error stopping motion service: {e}")
-        if flask_thread and flask_thread.is_alive():
-            try:
-                socketio.stop()
-                print("SocketIO stopped")
-            except Exception as e:
-                print(f"Error stopping SocketIO: {e}")
-            flask_thread.join(timeout=2.0)
-            print("Flask thread joined")
+        teleop_manager.stop()
+        app.config['motion_service'].stop()
         print("Shutdown complete")
     else:
         # Run Flask server normally

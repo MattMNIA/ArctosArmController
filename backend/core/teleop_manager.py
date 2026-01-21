@@ -22,9 +22,6 @@ class TeleopManagerError(RuntimeError):
 class TeleopManager:
     """Central coordinator for runtime-configurable teleoperation modes."""
 
-    # Modes that support vision display (camera window)
-    _VISION_MODES = {"fingers", "finger-sliders", "object-centering"}
-
     _AVAILABLE_MODES: Dict[str, Dict[str, Any]] = {
         "keyboard": {
             "label": "Keyboard",
@@ -200,60 +197,49 @@ class TeleopManager:
 
     def _stop_locked(self) -> None:
         self._stop_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-        self._thread = None
         controller = self._teleop_controller
         input_controller = self._input_controller
         self._teleop_controller = None
         self._input_controller = None
-        self._stop_event.clear()
 
+        # Stop the teleop controller first (stops velocities)
         if controller is not None:
             try:
                 controller.stop_all()
-            except Exception:  # pragma: no cover - best effort
+            except Exception:
                 logger.debug("Error while stopping teleop controller", exc_info=True)
 
+        # Close the input controller (releases camera, closes windows)
         if input_controller is not None:
             close_method = getattr(input_controller, "close", None)
             if callable(close_method):
                 try:
                     close_method()
-                except Exception:  # pragma: no cover - best effort cleanup
+                except Exception:
                     logger.debug("Error while closing input controller", exc_info=True)
 
-    def _resolve_show_vision(self, mode: str, options: Dict[str, Any], key: str, default: bool) -> bool:
-        """Resolve the vision display setting, applying global override if set.
-
-        Priority:
-        1. Global override from --show-vision/--no-show-vision CLI flags
-        2. Explicit option passed in the options dict
-        3. Default to False (safe for background threads / frontend API)
-        """
-        if self._show_vision_override is not None and mode in self._VISION_MODES:
-            return self._show_vision_override
-        # If option is explicitly provided, use it; otherwise default to False
-        # (showing windows from background threads or frontend API doesn't work reliably)
-        if key in options:
-            return bool(options[key])
-        return False
+        # Now wait for thread to finish (should exit quickly since resources are closed)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=0.5)
+        self._thread = None
+        self._stop_event.clear()
 
     def _create_input_controller(self, mode: str, options: Dict[str, Any]) -> InputController:
+        # Show vision window only if explicitly enabled via CLI --show-vision flag
+        # Frontend API calls never show windows (override is None)
+        show_window = self._show_vision_override is True
+
         if mode == "keyboard":
             return KeyboardController()
         if mode == "xbox":
             return XboxController()
         if mode == "fingers":
-            show_window = self._resolve_show_vision(mode, options, "showWindow", True)
             return FingerInputController(show_window=show_window)
         if mode == "finger-sliders":
-            show_window = self._resolve_show_vision(mode, options, "showWindow", True)
             return FingerSliderInput(gesture_update_interval=0.1, show_window=show_window)
         if mode == "object-centering":
             preferred_label = options.get("centerLabel")
             labels = [preferred_label] if preferred_label else None
-            display_feed = self._resolve_show_vision(mode, options, "displayFeed", True)
             detector_model = options.get("model") or options.get("detectorModel")
             detector_type = options.get("detectorType", "object")
             invert_horizontal = bool(options.get("invertHorizontal", False))
@@ -266,7 +252,7 @@ class TeleopManager:
                 detector_type=detector_type,
                 detector_model=detector_model,
                 use_motion_queue=True,
-                display_feed=display_feed,
+                display_feed=show_window,
                 invert_horizontal=invert_horizontal,
                 invert_vertical=invert_vertical,
                 gesture_config_path=gesture_config_path,
