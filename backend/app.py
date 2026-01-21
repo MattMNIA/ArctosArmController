@@ -189,6 +189,20 @@ if __name__ == "__main__":
 
         print("Teleoperation enabled. Press Ctrl+C to exit.")
 
+        # Prepare force-exit mechanism
+        import os
+        shutdown_initiated = threading.Event()
+
+        def force_exit_after_delay():
+            # Wait for shutdown to be initiated
+            shutdown_initiated.wait()
+            time.sleep(3.0)
+            print("\nShutdown taking too long, forcing exit...")
+            os._exit(0)
+
+        force_exit_thread = threading.Thread(target=force_exit_after_delay, daemon=True)
+        force_exit_thread.start()
+
         # For modes that require main thread (OpenCV windows on macOS),
         # run the teleop loop on the main thread
         if teleop_manager.requires_main_thread(teleop_mode):
@@ -196,26 +210,18 @@ if __name__ == "__main__":
             try:
                 teleop_manager.run_loop_blocking()
             except KeyboardInterrupt:
-                print("\nShutting down...")
+                pass  # Fall through to shutdown
         else:
             # For other modes, the loop runs in background thread
             try:
                 while True:
                     time.sleep(1.0)
             except KeyboardInterrupt:
-                print("\nShutting down...")
+                pass  # Fall through to shutdown
 
-        # Use a timeout thread to force exit if graceful shutdown hangs
-        import os
-        def force_exit():
-            time.sleep(5.0)
-            print("Shutdown taking too long, forcing exit...")
-            os._exit(0)
-
-        force_exit_thread = threading.Thread(target=force_exit, daemon=True)
-        force_exit_thread.start()
-
-        print("Stopping teleoperation...")
+        # Signal force-exit thread that shutdown has started
+        shutdown_initiated.set()
+        print("\nShutting down...")
         try:
             teleop_manager.stop()
             print("Teleop manager stopped")

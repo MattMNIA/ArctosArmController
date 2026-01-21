@@ -199,6 +199,7 @@ class TeleopManager:
 
         Call this after start_mode() when requires_main_thread() returns True.
         The loop will run until stop() is called or KeyboardInterrupt.
+        Note: Caller is responsible for calling stop() after this returns.
         """
         controller: Optional[TeleopController]
         with self._lock:
@@ -223,8 +224,8 @@ class TeleopManager:
                 time.sleep(loop_interval)
         except KeyboardInterrupt:
             logger.info("Teleop loop interrupted")
-        finally:
-            self.stop()
+            # Don't call stop() here - let the caller handle cleanup
+            # so force-exit mechanisms can be set up first
 
     # ------------------------------------------------------------------
     # Internal helpers
