@@ -25,9 +25,6 @@ class TeleopManager:
     # Modes that support vision display (camera window)
     _VISION_MODES = {"fingers", "finger-sliders", "object-centering"}
 
-    # Modes that require main thread for OpenCV window handling (macOS requirement)
-    _MAIN_THREAD_MODES = {"fingers", "finger-sliders"}
-
     _AVAILABLE_MODES: Dict[str, Dict[str, Any]] = {
         "keyboard": {
             "label": "Keyboard",
@@ -163,20 +160,16 @@ class TeleopManager:
             self._last_error = None
             self._stop_event.clear()
 
-            # Don't start background thread for modes that require main thread
-            # The caller should use run_loop_blocking() instead
-            if normalized_mode not in self._MAIN_THREAD_MODES:
-                loop_interval = 1.0 / getattr(teleop_controller, "teleop_hz", 50.0)
-                self._thread = threading.Thread(
-                    target=self._loop,
-                    name=f"teleop-{normalized_mode}",
-                    args=(loop_interval,),
-                    daemon=True,
-                )
-                self._thread.start()
+            loop_interval = 1.0 / getattr(teleop_controller, "teleop_hz", 50.0)
+            self._thread = threading.Thread(
+                target=self._loop,
+                name=f"teleop-{normalized_mode}",
+                args=(loop_interval,),
+                daemon=True,
+            )
+            self._thread.start()
 
-        logger.info("Teleoperation mode '%s' activated%s", normalized_mode,
-                    " (main thread required)" if normalized_mode in self._MAIN_THREAD_MODES else "")
+        logger.info("Teleoperation mode '%s' activated", normalized_mode)
         return self.current_state()
 
     def stop(self) -> None:
@@ -185,47 +178,6 @@ class TeleopManager:
             self._current_mode = None
             self._last_error = None
         logger.info("Teleoperation stopped")
-
-    def requires_main_thread(self, mode: str) -> bool:
-        """Check if a mode requires running on the main thread (e.g., for OpenCV on macOS)."""
-        normalized = mode.strip().lower()
-        return normalized in self._MAIN_THREAD_MODES
-
-    def run_loop_blocking(self) -> None:
-        """Run the teleop loop on the current (main) thread.
-
-        This is required for modes that use OpenCV windows on macOS,
-        since cv2.imshow/waitKey must be called from the main thread.
-
-        Call this after start_mode() when requires_main_thread() returns True.
-        The loop will run until stop() is called or KeyboardInterrupt.
-        Note: Caller is responsible for calling stop() after this returns.
-        """
-        controller: Optional[TeleopController]
-        with self._lock:
-            controller = self._teleop_controller
-            if controller is None:
-                raise TeleopManagerError("No active teleop mode to run")
-            loop_interval = 1.0 / getattr(controller, "teleop_hz", 50.0)
-
-        logger.info("Running teleop loop on main thread")
-        try:
-            while not self._stop_event.is_set():
-                with self._lock:
-                    controller = self._teleop_controller
-                if controller is None:
-                    break
-                try:
-                    controller.teleop_step()
-                except Exception as exc:
-                    logger.exception("Teleoperation loop error: %s", exc)
-                    with self._lock:
-                        self._last_error = str(exc)
-                time.sleep(loop_interval)
-        except KeyboardInterrupt:
-            logger.info("Teleop loop interrupted")
-            # Don't call stop() here - let the caller handle cleanup
-            # so force-exit mechanisms can be set up first
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -272,10 +224,20 @@ class TeleopManager:
                     logger.debug("Error while closing input controller", exc_info=True)
 
     def _resolve_show_vision(self, mode: str, options: Dict[str, Any], key: str, default: bool) -> bool:
-        """Resolve the vision display setting, applying global override if set."""
+        """Resolve the vision display setting, applying global override if set.
+
+        Priority:
+        1. Global override from --show-vision/--no-show-vision CLI flags
+        2. Explicit option passed in the options dict
+        3. Default to False (safe for background threads / frontend API)
+        """
         if self._show_vision_override is not None and mode in self._VISION_MODES:
             return self._show_vision_override
-        return bool(options.get(key, default))
+        # If option is explicitly provided, use it; otherwise default to False
+        # (showing windows from background threads or frontend API doesn't work reliably)
+        if key in options:
+            return bool(options[key])
+        return False
 
     def _create_input_controller(self, mode: str, options: Dict[str, Any]) -> InputController:
         if mode == "keyboard":
