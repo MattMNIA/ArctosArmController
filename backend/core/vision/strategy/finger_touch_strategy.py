@@ -86,6 +86,7 @@ class FingerTouchStrategy:
         self._last_gesture_overlays: List[str] = []
         self._last_gesture_process_time = 0.0
         self._gesture_process_interval = 0.15  # Only process gestures every 150ms
+        self._pending_gesture_events: List[Tuple[str, str, float]] = []  # Events to emit
 
         if self._enable_gestures:
             try:
@@ -118,6 +119,13 @@ class FingerTouchStrategy:
     def get_events(self) -> List[Tuple[str, Any, float]]:
         gestures = self._process_frame()
         events: List[Tuple[str, Any, float]] = []
+
+        # Collect any pending gesture events (pause/resume/zero)
+        with self._lock:
+            if self._pending_gesture_events:
+                events.extend(self._pending_gesture_events)
+                self._pending_gesture_events.clear()
+
         if gestures is None:
             return events
 
@@ -402,6 +410,7 @@ class FingerTouchStrategy:
         """Process gestures from the hand landmarks and handle pause/unpause.
 
         Thumbs up = resume (active), Thumbs down = pause
+        These are emitted as events so TeleopController can handle them.
         """
         if self._gesture_recognizer is None or not self._gesture_recognizer.enabled:
             return
@@ -417,15 +426,24 @@ class FingerTouchStrategy:
             with self._lock:
                 self._last_gesture_overlays = overlays
 
-            # Handle gesture events
+            # Handle gesture events - emit them so TeleopController can process
             for event in events:
                 if event.event == "teleop_pause":
+                    # Emit event for TeleopController and update local display mode
+                    with self._lock:
+                        self._pending_gesture_events.append(("press", "teleop_pause", 1.0))
                     self.set_teleop_mode("paused")
                     logger.info("Finger tracking paused by gesture (thumbs down)")
                 elif event.event == "teleop_unpause":
+                    # Emit event for TeleopController and update local display mode
+                    with self._lock:
+                        self._pending_gesture_events.append(("press", "teleop_resume", 1.0))
                     self.set_teleop_mode("active")
                     logger.info("Finger tracking resumed by gesture (thumbs up)")
                 elif event.event == "teleop_zero":
+                    # Emit event for TeleopController and update local display mode
+                    with self._lock:
+                        self._pending_gesture_events.append(("press", "zero_all_joints", 1.0))
                     self.set_teleop_mode("zeroing", hold_for=1.5)
                     logger.info("Moving to zero pose by gesture (rock and roll)")
 
