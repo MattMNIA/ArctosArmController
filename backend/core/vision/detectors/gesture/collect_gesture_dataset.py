@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
+import numpy as np
 
 import mediapipe as mp
 
@@ -17,6 +19,78 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from gesture_recognizer import GestureFeatureExtractor  # noqa: E402
+
+
+class IPCameraCapture:
+    """Wrapper for IP camera that mimics cv2.VideoCapture interface with background frame grabbing."""
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+        self._capture = cv2.VideoCapture(url)
+        if not self._capture or not self._capture.isOpened():
+            raise RuntimeError(f"Failed to open IP camera at {url}")
+
+        # Set buffer size to minimum to reduce latency
+        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        # Background frame grabbing for reduced latency
+        self._frame_lock = threading.Lock()
+        self._latest_frame: Optional[np.ndarray] = None
+        self._frame_available = False
+        self._stop_event = threading.Event()
+        self._grab_thread = threading.Thread(
+            target=self._grab_frames_loop,
+            daemon=True,
+            name="ip-camera-grab"
+        )
+        self._grab_thread.start()
+
+    def _grab_frames_loop(self) -> None:
+        """Continuously grab frames in background to keep buffer fresh."""
+        while not self._stop_event.is_set():
+            if not self._capture or not self._capture.isOpened():
+                break
+            try:
+                ret, frame = self._capture.read()
+                if ret and frame is not None:
+                    with self._frame_lock:
+                        self._latest_frame = frame
+                        self._frame_available = True
+                else:
+                    time.sleep(0.01)
+            except Exception:
+                time.sleep(0.01)
+
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        """Read the latest frame from the camera (non-blocking)."""
+        with self._frame_lock:
+            if self._frame_available and self._latest_frame is not None:
+                return True, self._latest_frame.copy()
+            return False, None
+
+    def isOpened(self) -> bool:
+        return self._capture is not None and self._capture.isOpened()
+
+    def release(self) -> None:
+        self._stop_event.set()
+        if self._grab_thread and self._grab_thread.is_alive():
+            self._grab_thread.join(timeout=0.5)
+        if self._capture and self._capture.isOpened():
+            self._capture.release()
+
+
+def create_capture(camera_index: int, ip_camera_url: Optional[str]) -> Union[cv2.VideoCapture, IPCameraCapture]:
+    """Create a camera capture object from either a local camera index or IP camera URL."""
+    if ip_camera_url:
+        print(f"Using IP camera: {ip_camera_url}")
+        return IPCameraCapture(ip_camera_url)
+    else:
+        print(f"Using local camera index: {camera_index}")
+        capture = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+        if not capture or not capture.isOpened():
+            # Try without CAP_DSHOW (for macOS/Linux)
+            capture = cv2.VideoCapture(camera_index)
+        return capture
 
 
 GESTURE_HINTS = {
@@ -56,7 +130,13 @@ def parse_args() -> argparse.Namespace:
         "--camera",
         type=int,
         default=0,
-        help="Camera index to use (default: 0).",
+        help="Camera index to use for local camera (default: 0).",
+    )
+    parser.add_argument(
+        "--ip-camera",
+        type=str,
+        default=None,
+        help="IP camera URL to use instead of local camera (e.g., 'http://192.168.1.100:81/stream').",
     )
     parser.add_argument(
         "--min-confidence",
@@ -99,9 +179,10 @@ def write_samples(
 
 def main() -> None:
     args = parse_args()
-    capture = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
+    capture = create_capture(args.camera, args.ip_camera)
     if not capture or not capture.isOpened():
-        raise RuntimeError(f"Unable to open camera index {args.camera}")
+        camera_desc = args.ip_camera if args.ip_camera else f"index {args.camera}"
+        raise RuntimeError(f"Unable to open camera {camera_desc}")
 
     feature_extractor = GestureFeatureExtractor()
     hands = mp.solutions.hands.Hands(
