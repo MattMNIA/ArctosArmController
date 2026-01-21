@@ -1,10 +1,13 @@
 import pybullet as p
 import pybullet_data
+from pathlib import Path
 
 p.connect(p.GUI)
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
-robot = p.loadURDF("C:\\Users\\mattm\\OneDrive - Iowa State University\\Personal Projects\\ArctosArm\\ArctosArmController\\backend\\models\\urdf\\arctos_urdf.urdf", useFixedBase=True)
+# URDF path relative to this script
+URDF_PATH = Path(__file__).resolve().parent.parent / "models" / "urdf" / "arctos_urdf.urdf"
+robot = p.loadURDF(str(URDF_PATH), useFixedBase=True)
 num_joints = p.getNumJoints(robot)
 
 # Print all link names and IDs

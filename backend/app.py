@@ -9,6 +9,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import logging
+from pathlib import Path
 from api.ik_routes import ik_bp
 from api.exec_routes import exec_bp
 from api.teleop_routes import teleop_bp
@@ -28,6 +29,9 @@ import time
 import argparse
 import signal
 import sys
+
+# URDF path - use Path for cross-platform compatibility
+URDF_PATH = Path(__file__).parent / "models" / "urdf" / "arctos_urdf.urdf"
 
 # Initialize Socket.IO with proper configuration
 socketio = SocketIO(
@@ -57,7 +61,7 @@ def create_app(drivers_list):
     ik_solver = None
     gui = 'pybullet' in drivers_list
     try:
-        ik_solver = AnalyticIKSolver(r"backend\models\urdf\arctos_urdf.urdf", gui=gui)
+        ik_solver = AnalyticIKSolver(str(URDF_PATH), gui=gui)
         app.config['ik_solver'] = ik_solver
         print("IK solver initialized successfully")
     except ImportError as e:
@@ -79,8 +83,8 @@ def create_app(drivers_list):
         shared_robot_id = ik_solver.robot_id if ik_solver else None
         shared_joint_indices = ik_solver.joint_indices if ik_solver else None
         pybullet_driver = PyBulletDriver(
-            gui=True, 
-            urdf_path=r"backend\models\urdf\arctos_urdf.urdf",
+            gui=True,
+            urdf_path=str(URDF_PATH),
             shared_physics_client=shared_client,
             shared_robot_id=shared_robot_id,
             shared_joint_indices=shared_joint_indices

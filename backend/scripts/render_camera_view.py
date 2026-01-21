@@ -2,6 +2,8 @@ import pybullet as p
 import pybullet_data
 import numpy as np
 import cv2  # optional, only if you want to view the image
+from pathlib import Path
+
 offset_pos = [0.036, -0.006, 0.123]  # meters
 offset_orn = p.getQuaternionFromEuler([0, 0, 0])
 p.connect(p.GUI)
@@ -9,7 +11,9 @@ p.setAdditionalSearchPath(pybullet_data.getDataPath())
 p.resetSimulation()
 p.setGravity(0,0,-9.81)
 
-robot = p.loadURDF("C:\\Users\\mattm\\OneDrive - Iowa State University\\Personal Projects\\ArctosArm\\ArctosArmController\\backend\\models\\urdf\\arctos_urdf.urdf", useFixedBase=True)
+# URDF path relative to this script
+URDF_PATH = Path(__file__).resolve().parent.parent / "models" / "urdf" / "arctos_urdf.urdf"
+robot = p.loadURDF(str(URDF_PATH), useFixedBase=True)
 link_name = "Link_4_1"
 
 # Find link index

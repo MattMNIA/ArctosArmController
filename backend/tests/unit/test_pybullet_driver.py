@@ -3,17 +3,21 @@ import pybullet as p
 import time
 import sys
 import os
+from pathlib import Path
 
-# Add backend to path using absolute path
-backend_path = r'c:\Users\mattm\OneDrive - Iowa State University\Personal Projects\ArctosArm\ArctosArmController\backend'
-sys.path.insert(0, backend_path)
+# Add backend to path using relative path from this file
+backend_path = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(backend_path))
 
 from core.drivers.pybullet_driver import PyBulletDriver
 
+# URDF path relative to backend directory
+URDF_PATH = backend_path / "models" / "urdf" / "arctos_urdf.urdf"
+
+
 class TestPyBulletDriverGripper(unittest.TestCase):
     def setUp(self):
-        urdf_path = "c:\\Users\\mattm\\OneDrive - Iowa State University\\Personal Projects\\ArctosArm\\ArctosArmController\\backend\\models\\urdf\\arctos_urdf.urdf"
-        self.driver = PyBulletDriver(urdf_path, gui=True)
+        self.driver = PyBulletDriver(str(URDF_PATH), gui=True)
         self.driver.connect()
         self.driver.enable()
 
