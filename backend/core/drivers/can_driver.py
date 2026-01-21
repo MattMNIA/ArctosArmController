@@ -739,11 +739,26 @@ class CanDriver():
                 offset_speed = abs(motor_config.get("offset_speed", 50))
                 logger.info(f"Applying homing offset {homing_offset} to joint {joint_idx}")
                 servo.run_motor_relative_motion_by_axis(offset_speed, 150, int(homing_offset))
+
+                # Wait for motor to start moving
+                time.sleep(0.1)
+                start_timeout = 2.0
+                start_time = time.time()
+                while not servo.is_motor_running() and (time.time() - start_time) < start_timeout:
+                    time.sleep(0.01)
+
+                if servo.is_motor_running():
+                    logger.info(f"Joint {joint_idx}: offset motion started")
+                else:
+                    logger.warning(f"Joint {joint_idx}: motor did not start moving for offset")
+
+                # Wait for motor to finish moving
                 while servo.is_motor_running():
                     time.sleep(0.05)
+                logger.info(f"Joint {joint_idx}: offset motion completed")
 
             # Set current position as zero (after offset is applied)
-            time.sleep(0.2)  # Ensure motor is fully settled before setting zero
+            time.sleep(0.3)  # Ensure motor is fully settled before setting zero
 
             # Read encoder before zeroing for comparison
             encoder_before = servo.read_encoder_value_addition()
@@ -868,13 +883,26 @@ class CanDriver():
             logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
             servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
             servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
-            # Wait for both to complete
+
+            # Wait for motors to start moving
             time.sleep(0.1)
+            start_timeout = 2.0
+            start_time = time.time()
+            while not (servo5.is_motor_running() or servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
+                time.sleep(0.01)
+
+            if servo5.is_motor_running() or servo6.is_motor_running():
+                logger.info("Motors 5 and 6: offset motion started")
+            else:
+                logger.warning("Motors 5 and 6: motors did not start moving for offset")
+
+            # Wait for both motors to finish moving
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
+            logger.info("Motors 5 and 6: offset motion completed")
 
         # Set current positions as zero (after offset is applied)
-        time.sleep(0.2)  # Ensure motors are fully settled before setting zero
+        time.sleep(0.3)  # Ensure motors are fully settled before setting zero
 
         # Read encoders before zeroing for comparison
         encoder5_before = servo5.read_encoder_value_addition()
@@ -981,21 +1009,28 @@ class CanDriver():
         # Apply offset if configured
         if offset6 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 6 offset ({offset6}) at speed {offset_speed}...")
-            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1* offset6)
-            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 *offset6)
-            time.sleep(0.2)
-            # Wait for both to start moving
-            start_timeout = 2.0  # seconds
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
+
+            # Wait for motors to start moving
+            time.sleep(0.1)
+            start_timeout = 2.0
             start_time = time.time()
-            while not (servo5.is_motor_running() and servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
+            while not (servo5.is_motor_running() or servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
                 time.sleep(0.01)
 
-            # Wait for both to complete
+            if servo5.is_motor_running() or servo6.is_motor_running():
+                logger.info("Motors 5 and 6: offset motion started")
+            else:
+                logger.warning("Motors 5 and 6: motors did not start moving for offset")
+
+            # Wait for both motors to finish moving
             while servo5.is_motor_running() or servo6.is_motor_running():
                 time.sleep(0.05)
+            logger.info("Motors 5 and 6: offset motion completed")
 
         # Set current positions as zero (after offset is applied)
-        time.sleep(0.2)  # Ensure motors are fully settled before setting zero
+        time.sleep(0.3)  # Ensure motors are fully settled before setting zero
 
         # Read encoders before zeroing for comparison
         encoder5_before = servo5.read_encoder_value_addition()
