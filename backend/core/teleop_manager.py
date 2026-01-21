@@ -223,9 +223,11 @@ class TeleopManager:
         if mode == "xbox":
             return XboxController()
         if mode == "fingers":
-            return FingerInputController()
+            show_window = options.get("showWindow", True)
+            return FingerInputController(show_window=show_window)
         if mode == "finger-sliders":
-            return FingerSliderInput(gesture_update_interval=0.1)
+            show_window = options.get("showWindow", True)
+            return FingerSliderInput(gesture_update_interval=0.1, show_window=show_window)
         if mode == "object-centering":
             preferred_label = options.get("centerLabel")
             labels = [preferred_label] if preferred_label else None

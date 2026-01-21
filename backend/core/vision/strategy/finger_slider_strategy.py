@@ -266,6 +266,8 @@ class FingerSliderStrategy:
         with self._lock:
             if not self._camera or not self._camera.is_opened():
                 return None
+            if self._hands is None:
+                return None
 
             ret, frame = self._camera.read()
             if not ret:

@@ -171,13 +171,21 @@ if __name__ == "__main__":
         flask_thread.start()
 
         teleop_manager = app.config['teleop_manager']
-        options = {
-            "centerLabel": args.center_label,
-            "detectorModel": args.yolo_model,
-            "displayFeed": args.show_vision,
-            "invertHorizontal": args.invert_horizontal,
-            "invertVertical": args.invert_vertical,
-        } if teleop_mode == 'object-centering' else {}
+        # Build options based on teleop mode
+        if teleop_mode == 'object-centering':
+            options = {
+                "centerLabel": args.center_label,
+                "detectorModel": args.yolo_model,
+                "displayFeed": args.show_vision,
+                "invertHorizontal": args.invert_horizontal,
+                "invertVertical": args.invert_vertical,
+            }
+        elif teleop_mode in ('fingers', 'finger-sliders'):
+            options = {
+                "showWindow": args.show_vision,
+            }
+        else:
+            options = {}
         # Filter out None values to avoid overriding defaults with nulls
         options = {k: v for k, v in options.items() if v is not None}
 
