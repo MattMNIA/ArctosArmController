@@ -188,11 +188,22 @@ if __name__ == "__main__":
             raise SystemExit(1) from exc
 
         print("Teleoperation enabled. Press Ctrl+C to exit.")
-        try:
-            while True:
-                time.sleep(1.0)
-        except KeyboardInterrupt:
-            print("\nShutting down...")
+
+        # For modes that require main thread (OpenCV windows on macOS),
+        # run the teleop loop on the main thread
+        if teleop_manager.requires_main_thread(teleop_mode):
+            print("Running teleop loop on main thread (required for camera window)...")
+            try:
+                teleop_manager.run_loop_blocking()
+            except KeyboardInterrupt:
+                print("\nShutting down...")
+        else:
+            # For other modes, the loop runs in background thread
+            try:
+                while True:
+                    time.sleep(1.0)
+            except KeyboardInterrupt:
+                print("\nShutting down...")
 
         # Use a timeout thread to force exit if graceful shutdown hangs
         import os
