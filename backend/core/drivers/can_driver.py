@@ -67,6 +67,8 @@ class CanDriver():
         # Add locks for thread safety
         self._servo_lock = threading.RLock()  # Reentrant lock for servo operations
         self._futures_lock = threading.Lock()  # For managing futures list
+        self._homing_in_progress = False  # Flag to prevent CAN conflicts during homing
+        self._cached_feedback = {"q": [], "dq": [], "error": [], "limits": []}  # Cached feedback for when homing
         self.velocity_active = [False] * 6  # Track which joints have active velocity control
         self._last_velocity_rpm = [0.0] * 6  # Track last commanded velocity per motor
 
@@ -631,7 +633,7 @@ class CanDriver():
 
     def home_joints(self, joint_indices: List[int]) -> None:
         """Home specific joints using the configured homing parameters.
-        
+
         Joints 4 and 5 (motors 5 and 6) require special homing procedures:
         - If both joint 4 and 5 are selected, they are homed together with a full sequence
         - If only one is selected, it uses a partial sequence specific to that joint
@@ -640,11 +642,22 @@ class CanDriver():
         if self.bus is None:
             logger.warning("CAN bus not initialized. Call connect() first.")
             return
-        
+
         with self._servo_lock:
             if not self.servos:
                 logger.warning("Servos not enabled. Call enable() first.")
                 return
+
+        # Cache current feedback before homing so status loop has data to return
+        try:
+            self._cached_feedback = self.get_feedback()
+        except Exception as e:
+            logger.warning(f"Could not cache feedback before homing: {e}")
+            self._cached_feedback = {"q": [], "dq": [], "error": [], "limits": []}
+
+        # Set homing flag to prevent CAN bus conflicts with status polling
+        self._homing_in_progress = True
+        logger.info("Homing started - pausing CAN status polling")
 
         # Cancel any pending futures before starting homing
         self._cancel_pending_futures()
@@ -715,6 +728,11 @@ class CanDriver():
                     
         except Exception as e:
             logger.error(f"Error waiting for homing tasks: {e}")
+        finally:
+            # Always clear homing flag when done
+            self._homing_in_progress = False
+            logger.info("Homing finished - resuming CAN status polling")
+
         logger.info(f"Homing completed for {len(joint_indices)} joints")
 
     def _home_standard_joint(self, joint_idx: int) -> None:
@@ -1360,6 +1378,10 @@ class CanDriver():
 
     def get_feedback(self) -> Dict[str, Any]:
         """Get robot feedback with improved error handling."""
+        # Skip CAN polling during homing to avoid bus conflicts
+        if self._homing_in_progress:
+            return self._cached_feedback
+
         with self._servo_lock:
             if not self.servos:
                 logger.warning("Servos not enabled.")

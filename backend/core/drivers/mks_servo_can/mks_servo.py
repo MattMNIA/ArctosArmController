@@ -345,12 +345,13 @@ class MksServo:
                 try:
                     self.check_msg_crc(message)
                     if message.arbitration_id == self.can_id:
-                        if message.data[0] != op_code or len(message.data) != response_length:
-                            logger.error(f"Unexpected opcode or response length.")
-                            logger.error(f"op_code:0x{op_code:X}")
-                            logger.error(f"message.data:{message.data}")
-                            logger.error(message)
-                        status = message.data
+                        # Only accept responses with matching opcode
+                        if message.data[0] == op_code and len(message.data) == response_length:
+                            status = message.data
+                        else:
+                            # Wrong opcode or length - ignore this message (let permanent listener handle it)
+                            # This can happen when the servo sends unsolicited status updates
+                            logger.debug(f"Ignoring message with opcode 0x{message.data[0]:02X} while waiting for 0x{op_code:02X}")
                 except InvalidCRCError as e:
                     logger.error(f"CRC check failed for the message: {e}")
 
