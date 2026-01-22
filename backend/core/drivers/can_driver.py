@@ -843,17 +843,8 @@ class CanDriver():
 
         # Stop both motors
         servo5.stop_motor_in_speed_mode(255)
-        time.sleep(0.05)
         servo6.stop_motor_in_speed_mode(255)
-        time.sleep(0.3)
-
-        # Wait for motors to actually stop before starting offset motion (with timeout)
-        stop_wait_start = time.time()
-        while servo5.is_motor_running() or servo6.is_motor_running():
-            if time.time() - stop_wait_start > 3.0:
-                logger.warning("Timeout waiting for motors to stop after limit hit")
-                break
-            time.sleep(0.1)
+        time.sleep(0.2)
 
         if not limit_hit:
             logger.warning("Timeout waiting for motor 5 endstop")
@@ -862,20 +853,12 @@ class CanDriver():
         if offset5 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 5 offset ({offset5}) at speed {offset_speed}...")
             servo5.run_motor_relative_motion_by_axis(offset_speed, 150, offset5)
-            time.sleep(0.05)
             servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1*offset5)
-            # Wait for both to complete (with timeout)
-            time.sleep(0.2)
-            offset_wait_start = time.time()
+            # Wait for both to complete
+            time.sleep(0.1)
             while servo5.is_motor_running() or servo6.is_motor_running():
-                if time.time() - offset_wait_start > 10.0:
-                    logger.warning("Timeout waiting for offset motion to complete")
-                    break
-                time.sleep(0.1)
-
-        time.sleep(0.1)
+                time.sleep(0.05)
         servo5.set_current_axis_to_zero()
-        time.sleep(0.05)
         servo6.set_current_axis_to_zero()
         logger.info("Joint 4 homing completed successfully")
 
@@ -943,17 +926,8 @@ class CanDriver():
                 time.sleep(0.05)
 
         servo5.stop_motor_in_speed_mode(255)
-        time.sleep(0.05)
         servo6.stop_motor_in_speed_mode(255)
-        time.sleep(0.3)
-
-        # Wait for motors to actually stop (with timeout)
-        stop_wait_start = time.time()
-        while servo5.is_motor_running() or servo6.is_motor_running():
-            if time.time() - stop_wait_start > 3.0:
-                logger.warning("Timeout waiting for motors to stop after limit hit")
-                break
-            time.sleep(0.1)
+        time.sleep(0.2)
 
         if not limit_hit:
             logger.warning("Timeout waiting for motor 6 endstop")
@@ -961,21 +935,20 @@ class CanDriver():
         # Apply offset if configured
         if offset6 != 0:
             logger.info(f"Phase 2: Moving both motors by motor 6 offset ({offset6}) at speed {offset_speed}...")
-            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
-            time.sleep(0.05)
-            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 * offset6)
-            # Wait for both to complete (with timeout)
+            servo5.run_motor_relative_motion_by_axis(offset_speed, 150, -1* offset6)
+            servo6.run_motor_relative_motion_by_axis(offset_speed, 150, -1 *offset6)
             time.sleep(0.2)
-            offset_wait_start = time.time()
-            while servo5.is_motor_running() or servo6.is_motor_running():
-                if time.time() - offset_wait_start > 10.0:
-                    logger.warning("Timeout waiting for offset motion to complete")
-                    break
-                time.sleep(0.1)
+            # Wait for both to start moving
+            start_timeout = 2.0  # seconds
+            start_time = time.time()
+            while not (servo5.is_motor_running() and servo6.is_motor_running()) and (time.time() - start_time) < start_timeout:
+                time.sleep(0.01)
 
-        time.sleep(0.1)
+            # Wait for both to complete
+            while servo5.is_motor_running() or servo6.is_motor_running():
+                time.sleep(0.05)
+
         servo5.set_current_axis_to_zero()
-        time.sleep(0.05)
         servo6.set_current_axis_to_zero()
         logger.info("Joint 5 homing completed successfully")
 
