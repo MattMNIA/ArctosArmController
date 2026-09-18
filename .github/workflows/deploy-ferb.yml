@@ -1,0 +1,101 @@
+# Deploys the F.E.R.B frontend to ferb.mattmn.com on every push to main
+# that touches frontend/.
+#
+# The droplet has 960MB RAM and cannot build, so CI builds and ships the
+# result. Deploys are atomic: upload to a new release directory, then flip
+# the /srv/ferb/current symlink.
+#
+# Required repo secrets:
+#   DEPLOY_SSH_KEY      private key for the `deploy` user on the droplet
+#   DEPLOY_HOST         mattmn.com
+#   DEPLOY_KNOWN_HOSTS  output of: ssh-keyscan mattmn.com
+name: Deploy FERB
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-ferb.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ferb-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: ferb
+  BUILD_DIR: frontend/dist
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Sparse checkout: the repo carries ~50MB of YOLO weights and gesture
+      # models under backend/ that the frontend build has no use for.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: frontend
+          sparse-checkout-cone-mode: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+        env:
+          # MUST be false. This is the PUBLIC site — a private build un-gates
+          # Robot Control, Motor Homing, Motor Config and PID Tuning for every
+          # visitor. Local .env sets this to true for dev; CI must not inherit
+          # that.
+          VITE_PRIVATE_BUILD: 'false'
+
+      - name: Verify build
+        run: |
+          test -f "$BUILD_DIR/index.html" \
+            || { echo "No index.html in $BUILD_DIR"; exit 1; }
+          test -d "$BUILD_DIR/models" \
+            || { echo "models/ missing - public assets did not copy"; exit 1; }
+          test -d "$BUILD_DIR/media" \
+            || { echo "media/ missing - public assets did not copy"; exit 1; }
+          echo "Build OK: $(find "$BUILD_DIR" -type f | wc -l) files, $(du -sh "$BUILD_DIR" | cut -f1)"
+
+      - name: Set up SSH
+        run: |
+          install -d -m 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload release
+        run: |
+          RELEASE="${GITHUB_SHA::7}"
+          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
+          ssh deploy@${{ secrets.DEPLOY_HOST }} \
+            "mkdir -p /srv/$APP_NAME/releases/$RELEASE"
+          # --delete matters: the old scp-based deploy never removed anything,
+          # so the live assets/ dir accumulated 9 bundles where only 2 were used.
+          rsync -az --delete \
+            "$BUILD_DIR"/ \
+            deploy@${{ secrets.DEPLOY_HOST }}:/srv/$APP_NAME/releases/$RELEASE/
+
+      - name: Activate release
+        run: |
+          ssh deploy@${{ secrets.DEPLOY_HOST }} \
+            "activate-release $APP_NAME $RELEASE"
+
+      - name: Smoke test
+        run: |
+          sleep 3
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://ferb.mattmn.com)
+          echo "https://ferb.mattmn.com -> $code"
+          [ "$code" = "200" ] || exit 1
