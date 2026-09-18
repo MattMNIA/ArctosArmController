@@ -7,6 +7,9 @@ interface JointControlProps {
   setJointInputs: (inputs: string[]) => void;
   connected: boolean;
   loading: boolean;
+  // Passed by ArmDashboard but not rendered here - the IK controls live on
+  // the IK Testing page. Optional so the dashboard keeps compiling.
+  onSolveIK?: () => void;
   onCalculateFK: () => void;
   onExecuteMove: () => void;
   fkResult: { position: number[]; orientation: number[] } | null;

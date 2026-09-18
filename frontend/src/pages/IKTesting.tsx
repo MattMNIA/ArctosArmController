@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useCallback, useEffect, useRef } from "react";
+import React, { Suspense, useState, useCallback, useEffect } from "react";
 import { Canvas, useLoader, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import URDFLoader from "urdf-loader";
@@ -37,12 +37,6 @@ interface FKResult {
   position: number[];
   orientation: number[];
   euler: number[];
-}
-
-interface IKResult {
-  joints: number[];
-  success: boolean;
-  error: number | string;
 }
 
 interface LinearPreviewResult {
